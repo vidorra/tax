@@ -1,0 +1,105 @@
+{
+  "formaat": "ibcalculator-jaar",
+  "jaar": 2025,
+  "status": "concept",
+  "geexporteerd": "2026-03-02",
+  "invoer": {
+    "jaar": 2025,
+    "personen": [
+      {
+        "id": "A",
+        "naam": "Persoon A",
+        "geboortedatum": "1979-09-23",
+        "ondernemingen": [
+          {
+            "naam": "Voorbeeld Meubelmakerij",
+            "winstberekening": {
+              "soort": "saldo",
+              "saldo": 48000
+            },
+            "uren": {
+              "onderneming": 0,
+              "urencriteriumGehaald": true
+            },
+            "startjaar": 2015
+          }
+        ],
+        "loon": [],
+        "inkomensvoorziening": {
+          "lijfrentePremies": 0,
+          "aovPremies": 0
+        }
+      },
+      {
+        "id": "B",
+        "naam": "Persoon B",
+        "geboortedatum": "1984-03-02",
+        "ondernemingen": [],
+        "loon": [],
+        "inkomensvoorziening": {
+          "lijfrentePremies": 0,
+          "aovPremies": 0
+        }
+      }
+    ],
+    "fiscaalPartner": true,
+    "kinderen": [],
+    "box3": {
+      "posities": [
+        {
+          "id": "p1",
+          "omschrijving": "Spaarrekening",
+          "categorie": "bankNL",
+          "eigenaar": "A",
+          "waardeBegin": 25000,
+          "waardeEind": 27000
+        },
+        {
+          "id": "p2",
+          "omschrijving": "DEGIRO effecten",
+          "categorie": "beleggingen",
+          "eigenaar": "B",
+          "waardeBegin": 12311.69,
+          "waardeEind": 13353.41,
+          "dividendbelasting": 7.5,
+          "bronbelasting": {
+            "land": "US",
+            "bedrag": 3.29,
+            "brutoInkomsten": 21.91
+          }
+        }
+      ],
+      "schulden": []
+    },
+    "verdeling": "optimaal"
+  },
+  "samenvatting": {
+    "jaar": 2025,
+    "variant": null,
+    "paramsStatus": "definitief",
+    "teBetalenIB": 6622,
+    "teBetalenZvw": 2090,
+    "verschuldigdIB": 6630,
+    "verschuldigdZvw": 2090,
+    "toeslagen": 1456,
+    "aantalWaarschuwingen": 3,
+    "personen": [
+      {
+        "id": "A",
+        "verzamelinkomen": 39748,
+        "verschuldigdIB": 6630,
+        "teBetalenIB": 6626,
+        "zvw": 2090,
+        "teBetalenZvw": 2090
+      },
+      {
+        "id": "B",
+        "verzamelinkomen": 0,
+        "verschuldigdIB": 0,
+        "teBetalenIB": -4,
+        "zvw": 0,
+        "teBetalenZvw": 0
+      }
+    ]
+  }
+}

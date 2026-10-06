@@ -1,0 +1,115 @@
+{
+ "debit": {
+  "total": "127998.0",
+  "non_current_assets": [
+   {
+    "ledger_account_id": "101",
+    "value": "2600.0"
+   },
+   {
+    "ledger_account_id": "104",
+    "value": "56500.0"
+   }
+  ],
+  "current_assets": [
+   {
+    "ledger_account_id": "102",
+    "value": "3500.0"
+   },
+   {
+    "ledger_account_id": "105",
+    "value": "14520.0"
+   },
+   {
+    "ledger_account_id": "106",
+    "value": "0.0"
+   },
+   {
+    "ledger_account_id": "107",
+    "value": "300.0"
+   },
+   {
+    "ledger_account_id": "109",
+    "value": "2340.0"
+   },
+   {
+    "ledger_account_id": "103",
+    "value": "48198.0",
+    "children": [
+     {
+      "ledger_account_id": "108",
+      "value": "20000.0"
+     }
+    ]
+   },
+   {
+    "ledger_account_id": "110",
+    "value": "40.0"
+   }
+  ]
+ },
+ "credit": {
+  "total": "127998.0",
+  "equity": [
+   {
+    "ledger_account_id": "201",
+    "value": "61180.0"
+   },
+   {
+    "ledger_account_id": "202",
+    "value": "17460.0"
+   },
+   {
+    "ledger_account_id": "203",
+    "value": "-83000.6"
+   },
+   {
+    "ledger_account_id": "204",
+    "value": "-46620.8"
+   },
+   {
+    "ledger_account_id": "205",
+    "value": "-11500.0"
+   },
+   {
+    "ledger_account_id": "206",
+    "value": "2500.0"
+   }
+  ],
+  "provisions": [],
+  "non_current_liabilities": [
+   {
+    "ledger_account_id": "207",
+    "value": "3000.0"
+   },
+   {
+    "ledger_account_id": "208",
+    "value": "12000.0"
+   }
+  ],
+  "current_liabilities": [
+   {
+    "ledger_account_id": "301",
+    "value": "1200.0"
+   },
+   {
+    "ledger_account_id": "302",
+    "value": "4100.0"
+   },
+   {
+    "ledger_account_id": "303",
+    "value": "1000.0"
+   }
+  ],
+  "open_years": [
+   {
+    "year": 2024,
+    "value": "72000.0"
+   },
+   {
+    "year": 2025,
+    "value": "94679.4"
+   }
+  ]
+ }
+}

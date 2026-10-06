@@ -1,0 +1,279 @@
+{
+  "degiro-rekeningoverzicht-2025-nl.csv + degiro-portefeuille-*.csv": {
+    "preset": "degiro",
+    "scheidingsteken": ",",
+    "decimaal": ",",
+    "datum": "dd-MM-yyyy",
+    "bom": false,
+    "volgorde": "nieuwste eerst",
+    "rekening": {
+      "waardeBegin_totaal": "12724.04",
+      "waardeEind_totaal": "13561.12",
+      "externeStortingen": "1000.00",
+      "externeOpnames": "500.00",
+      "kosten": "10.40",
+      "rente": "0.62",
+      "brutoDividend": "107.91",
+      "nettoDividendGecrediteerdEUR": "88.14",
+      "werkelijkRendement": "367.25"
+    },
+    "posities": [
+      {
+        "categorie": "beleggingen",
+        "waardeBegin": "12311.69",
+        "waardeEind": "13353.41",
+        "stortingen": "1239.00",
+        "onttrekkingen": "456.00",
+        "directeOpbrengsten": "107.91",
+        "dividendbelasting": "7.50",
+        "bronbelasting": [
+          {
+            "land": "US",
+            "bedrag": "3.29",
+            "brutoInkomsten": "21.91"
+          },
+          {
+            "land": "FR",
+            "bedrag": "9.00",
+            "brutoInkomsten": "36.00"
+          }
+        ]
+      },
+      {
+        "categorie": "bankBuitenland",
+        "omschrijving": "DEGIRO geldrekening (flatexDEGIRO Bank, Duitsland)",
+        "waardeBegin": "412.35",
+        "waardeEind": "207.71",
+        "stortingen": "1544.76",
+        "onttrekkingen": "1749.40",
+        "directeOpbrengsten": "0.62"
+      }
+    ],
+    "regels": {
+      "fx": "Bruto en bronbelasting in vreemde valuta: delen door de FX van de bijbehorende regel Valuta Debitering (eerstvolgende omwisseling), per regel afronden op centen.",
+      "landNaarIsin": "Dividendbelasting bij een NL-ISIN is Nederlandse dividendbelasting (voorheffing); bij een ander land is het buitenlandse bronbelasting van het ISIN-land.",
+      "kosten": "Transactie- en aansluitingskosten tellen als onttrekking (kosten zijn niet aftrekbaar bij het werkelijk rendement).",
+      "info": "Regels zonder Mutatie (Overboeking van uw geldrekening bij flatexDEGIRO Bank ...) negeren."
+    }
+  },
+  "degiro-account-2025-en.csv": {
+    "preset": "degiro",
+    "scheidingsteken": ",",
+    "decimaal": ".",
+    "datum": "dd-MM-yyyy",
+    "bom": false,
+    "opmerking": "Zelfde gebeurtenissen als de eerste twaalf regels van het NL-bestand (tot en met 10-06-2025); omschrijvingen in het Engels zijn deels niet geverifieerd.",
+    "externeStortingen": "1000.00",
+    "brutoDividendRegels": 4
+  },
+  "ibkr-activity-statement-2025.csv": {
+    "preset": "ibkr-activity",
+    "scheidingsteken": ",",
+    "decimaal": ".",
+    "datum": "yyyy-MM-dd",
+    "bom": true,
+    "rekening": {
+      "waardeBegin": "13010.40",
+      "waardeEind": "16870.87",
+      "kasBegin": "1250.40",
+      "kasEind": "336.18",
+      "stortingenExtern": "3000",
+      "opnamesExtern": "1500",
+      "dividendBrutoEUR": "250.35",
+      "bronbelastingEUR": "51.75",
+      "renteEUR": "1.38",
+      "kostenEUR": "14.20",
+      "nettoOpbrengstGecrediteerd": "199.98",
+      "werkelijkRendement": "2426.42"
+    },
+    "bronbelastingPerLandLokaal": {
+      "CA/USD": "2.79",
+      "CH/CHF": "21.00",
+      "KR/USD": "20.46",
+      "US/USD": "9.38",
+      "onbekend/USD": "0.31"
+    },
+    "brutoPerLandLokaal": {
+      "CA/USD": "18.60",
+      "CH/CHF": "60.00",
+      "KR/USD": "93.00",
+      "US/USD": "62.50",
+      "geen/USD": "33.60",
+      "payment-in-lieu/USD": "1.20"
+    },
+    "regels": {
+      "land": "Land uit het achtervoegsel \" - XX Tax\" in de omschrijving, niet uit het ISIN: HYMG heeft een US-ISIN maar KR-bronbelasting.",
+      "correctie": "Een terugboeking (+) en herinhouding (-) op dezelfde dag heffen elkaar op; saldeer per effect en datum.",
+      "paymentInLieu": "Payment in Lieu of Dividend is geen dividend in verdragszin: geen bronbelasting, wel bruto opbrengst.",
+      "renteBronbelasting": "Withholding @ 20% on Credit Interest heeft geen landcode: land onbekend, gebruiker laten kiezen.",
+      "eur": "Gebruik per valuta de regel \"Total in EUR\"; per land binnen een valuta naar rato verdelen."
+    }
+  },
+  "trading212-history-2025.csv": {
+    "preset": "trading212",
+    "scheidingsteken": ",",
+    "decimaal": ".",
+    "datum": "yyyy-MM-dd HH:mm:ss[.SSS][+00:00]",
+    "bom": false,
+    "stortingen": "2000.00",
+    "opnames": "300.00",
+    "renteEUR": "1.84",
+    "dividend": [
+      {
+        "isin": "US9999NLT017",
+        "land": "US",
+        "brutoLokaal": "1.50 USD",
+        "bronbelastingLokaal": "0.23 USD",
+        "nettoEUR": "1.17"
+      },
+      {
+        "isin": "NL0099990010",
+        "land": "NL",
+        "bruto": "12.50",
+        "dividendbelasting": "1.88",
+        "nettoEUR": "10.62"
+      }
+    ],
+    "aantallenEind": {
+      "US9999NLT017": "5",
+      "NL0099990010": "6"
+    },
+    "regels": {
+      "bruto": "Bruto in lokale valuta = No. of shares x Price / share; bronbelasting staat in Withholding tax (valuta in Currency (Withholding tax)); Total is netto in EUR.",
+      "eur": "Impliciete koers = (bruto - bronbelasting) / Total; bruto EUR = bruto lokaal / impliciete koers.",
+      "kolommen": "Lees kolommen op naam: de volgorde en het aantal kolommen verschillen per export.",
+      "waarde": "Geen standen in dit bestand: begin- en eindwaarde komen uit het jaaroverzicht of uit aantal x koers die de gebruiker invult."
+    }
+  },
+  "saxo-transacties-2025.csv": {
+    "preset": "saxo",
+    "scheidingsteken": ",",
+    "decimaal": "gemengd: punt in prijzen, komma in een deel van Amount",
+    "datum": "dd-MMM-yyyy (Engelse of Nederlandse maandafkorting)",
+    "bom": false,
+    "stortingen": "2500",
+    "opnames": "750",
+    "kosten": "3.91",
+    "dividendNettoGeboekt": [
+      "30.24 USD x 0.92139706",
+      "15.94 EUR"
+    ],
+    "regels": {
+      "bruto": "Dividend wordt netto geboekt (na bronbelasting). Bruto en ingehouden belasting uit het Fiscaal Jaaroverzicht halen; preset markeert bruto als onbekend.",
+      "zekerheid": "Kop geverifieerd aan een openbaar voorbeeldbestand; de dividend- en belastingregels niet aan een echte Nederlandse export."
+    }
+  },
+  "bux-transactions-2025.csv": {
+    "preset": "bux",
+    "scheidingsteken": ",",
+    "decimaal": ".",
+    "datum": "yyyy-MM-dd HH:mm:ss.ffffff (CET)",
+    "bom": false,
+    "stortingen": "500",
+    "opnames": "20.00",
+    "kosten": "3.99",
+    "renteEUR": "0.23",
+    "dividend": [
+      {
+        "bruto": "12.50",
+        "dividendbelasting": "1.88",
+        "netto": "10.62"
+      },
+      {
+        "bruto": null,
+        "netto": "4.25",
+        "melding": "Bruto ontbreekt in de export; uit het jaaroverzicht halen."
+      }
+    ]
+  },
+  "rabobank-beleggen-transacties-2025.csv": {
+    "preset": "rabobank-beleggen",
+    "scheidingsteken": ";",
+    "decimaal": ",",
+    "datum": "dd-MM-yyyy",
+    "bom": true,
+    "regeleinde": "CRLF",
+    "stortingen": "250.00",
+    "opnames": "400.00",
+    "kosten": "17.44",
+    "renteEUR": "1.63",
+    "aankopen": "157.79",
+    "verkopen": "166.36",
+    "dividend": {
+      "bruto": "80.63",
+      "netto": "68.54",
+      "dividendbelasting": "12.09",
+      "land": "NL"
+    },
+    "regels": {
+      "stortingOpname": "Storting / opname: teken van Bedrag bepaalt storting (+) of opname (-).",
+      "koers": "Koers heeft een spatie aan het eind: trimmen."
+    }
+  },
+  "bitvavo-transacties-2025.csv": {
+    "preset": "bitvavo",
+    "scheidingsteken": ",",
+    "decimaal": ".",
+    "datum": "yyyy-MM-dd + HH:mm:ss[.SSS] (Europe/Amsterdam)",
+    "bom": false,
+    "stortingenEUR": "1500",
+    "opnamesEUR": "300",
+    "aantallenEind": {
+      "BTC": "0.0060000",
+      "ETH": "0.1007000",
+      "EUR": "187.52"
+    },
+    "stakingETH": "0.0012000",
+    "meldingen": [
+      "ETH-opname naar een extern adres: eigen wallet (overboeking binnen box 3) of verkoop/schenking? Vraag de gebruiker."
+    ]
+  },
+  "coinbase-transactions-2025.csv": {
+    "preset": "coinbase",
+    "scheidingsteken": ",",
+    "decimaal": ".",
+    "datum": "yyyy-MM-dd HH:mm:ss UTC",
+    "bom": false,
+    "voorloopregels": 2,
+    "bedragen": "met valutateken (€, $) ervoor, minteken voor het valutateken",
+    "stortingenEUR": "250",
+    "aantallenEind": {
+      "BTC": "0.00100000",
+      "XRP": "13.2"
+    },
+    "meldingen": [
+      "Send van BTC naar extern adres: eigen wallet of niet?",
+      "Convert: BTC verlaagt, XRP verhoogt; Quantity Transacted is alleen de bronkant."
+    ]
+  },
+  "generiek-puntkomma.csv": {
+    "preset": "generiek",
+    "scheidingsteken": ";",
+    "decimaal": ",",
+    "duizendtal": ".",
+    "datum": "dd-MM-yyyy",
+    "bom": false,
+    "koppeling": {
+      "datum": "Datum",
+      "soort": "Soort",
+      "bedrag": "Bedrag",
+      "valuta": "Valuta",
+      "isin": "ISIN",
+      "bronbelasting": "Bronbelasting",
+      "land": "Land"
+    },
+    "waardenSoort": {
+      "Storting": "storting",
+      "Opname": "opname",
+      "Dividend": "dividend",
+      "Rente": "rente"
+    },
+    "stortingen": "1250.00",
+    "opnames": "300.00",
+    "dividendBruto": "42.00",
+    "bronbelasting": {
+      "DE": "11.08"
+    },
+    "rente": "3.12"
+  }
+}

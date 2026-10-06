@@ -1,0 +1,4 @@
+[
+  { "id": "100000000000000001", "name": "Studio Voorbeeld", "language": "nl", "currency": "EUR", "country": "NL", "time_zone": "Europe/Amsterdam" },
+  { "id": "100000000000000002", "name": "Verhuur Voorbeeld", "language": "nl", "currency": "EUR", "country": "NL", "time_zone": "Europe/Amsterdam" }
+]

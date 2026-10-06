@@ -1,0 +1,13 @@
+{
+  "_bron": "AOW-leeftijd per kalenderjaar waarin de leeftijd wordt bereikt (art. 7a Algemene Ouderdomswet; SVB, 'Wanneer gaat mijn AOW in?'). Alleen jaren zonder jaarmodule; vanaf 2021 staat de AOW-leeftijd in overig.aowLeeftijd van de jaarmodule.",
+  "jaren": {
+    "2013": { "jaren": 65, "maanden": 1 },
+    "2014": { "jaren": 65, "maanden": 2 },
+    "2015": { "jaren": 65, "maanden": 3 },
+    "2016": { "jaren": 65, "maanden": 6 },
+    "2017": { "jaren": 65, "maanden": 9 },
+    "2018": { "jaren": 66, "maanden": 0 },
+    "2019": { "jaren": 66, "maanden": 4 },
+    "2020": { "jaren": 66, "maanden": 4 }
+  }
+}

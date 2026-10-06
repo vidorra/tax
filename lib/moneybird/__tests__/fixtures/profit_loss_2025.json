@@ -1,0 +1,81 @@
+{
+ "revenue_by_ledger_account": {
+  "ledger_accounts": [
+   {
+    "ledger_account_id": "401",
+    "value": "97000.0"
+   },
+   {
+    "ledger_account_id": "402",
+    "value": "6500.0"
+   },
+   {
+    "ledger_account_id": "403",
+    "value": "1500.0"
+   }
+  ]
+ },
+ "direct_costs_by_ledger_account": {
+  "ledger_accounts": [
+   {
+    "ledger_account_id": "501",
+    "value": "1200.0"
+   }
+  ]
+ },
+ "expenses_by_ledger_account": {
+  "ledger_accounts": [
+   {
+    "ledger_account_id": "601",
+    "value": "2350.4"
+   },
+   {
+    "ledger_account_id": "602",
+    "value": "640.0"
+   },
+   {
+    "ledger_account_id": "603",
+    "value": "385.5"
+   },
+   {
+    "ledger_account_id": "604",
+    "value": "1500.0"
+   },
+   {
+    "ledger_account_id": "605",
+    "value": "1840.0"
+   },
+   {
+    "ledger_account_id": "606",
+    "value": "900.0"
+   },
+   {
+    "ledger_account_id": "607",
+    "value": "180.0"
+   },
+   {
+    "ledger_account_id": "608",
+    "value": "1250.0"
+   }
+  ]
+ },
+ "other_income_expenses_by_ledger_account": {
+  "ledger_accounts": [
+   {
+    "ledger_account_id": "701",
+    "value": "-45.3"
+   },
+   {
+    "ledger_account_id": "702",
+    "value": "120.0"
+   }
+  ]
+ },
+ "total_revenue": "105000.0",
+ "total_direct_costs": "1200.0",
+ "total_expenses": "9045.9",
+ "total_other_income_expenses": "74.7",
+ "gross_profit": "103800.0",
+ "operating_profit": "94754.1",
+ "net_profit": "94679.4"
+}

@@ -1,0 +1,608 @@
+[
+ {
+  "id": "401",
+  "administration_id": "100000000000000001",
+  "name": "Omzet",
+  "account_type": "revenue",
+  "account_id": null,
+  "parent_id": null,
+  "active": true,
+  "created_at": "2023-01-02T09:00:00.000Z",
+  "updated_at": "2023-01-02T09:00:00.000Z",
+  "taxonomy_item": {
+   "taxonomy_version": "3.6",
+   "code": "WOmzNodOdh",
+   "name": "Omzet diensten hoog tarief",
+   "name_english": null,
+   "reference": null
+  }
+ },
+ {
+  "id": "402",
+  "administration_id": "100000000000000001",
+  "name": "Omzet hosting",
+  "account_type": "revenue",
+  "account_id": null,
+  "parent_id": null,
+  "active": true,
+  "created_at": "2023-01-02T09:00:00.000Z",
+  "updated_at": "2023-01-02T09:00:00.000Z",
+  "taxonomy_item": {
+   "taxonomy_version": "3.6",
+   "code": "WOmzNodOdh",
+   "name": "Omzet diensten hoog tarief",
+   "name_english": null,
+   "reference": null
+  }
+ },
+ {
+  "id": "403",
+  "administration_id": "100000000000000001",
+  "name": "Wijziging onderhanden werk",
+  "account_type": "revenue",
+  "account_id": null,
+  "parent_id": null,
+  "active": true,
+  "created_at": "2023-01-02T09:00:00.000Z",
+  "updated_at": "2023-01-02T09:00:00.000Z",
+  "taxonomy_item": {
+   "taxonomy_version": "3.6",
+   "code": "WWivWowWow",
+   "name": "Wijziging in voorraden onderhanden werk",
+   "name_english": null,
+   "reference": null
+  }
+ },
+ {
+  "id": "501",
+  "administration_id": "100000000000000001",
+  "name": "Inkoop software",
+  "account_type": "direct_costs",
+  "account_id": null,
+  "parent_id": null,
+  "active": true,
+  "created_at": "2023-01-02T09:00:00.000Z",
+  "updated_at": "2023-01-02T09:00:00.000Z",
+  "taxonomy_item": {
+   "taxonomy_version": "3.6",
+   "code": "WKprInhInh",
+   "name": "Inkoopwaarde handelsgoederen",
+   "name_english": null,
+   "reference": null
+  }
+ },
+ {
+  "id": "601",
+  "administration_id": "100000000000000001",
+  "name": "Kantoorkosten",
+  "account_type": "expenses",
+  "account_id": null,
+  "parent_id": null,
+  "active": true,
+  "created_at": "2023-01-02T09:00:00.000Z",
+  "updated_at": "2023-01-02T09:00:00.000Z",
+  "taxonomy_item": {
+   "taxonomy_version": "3.6",
+   "code": "WBedKanKan",
+   "name": "Kantoorbenodigdheden",
+   "name_english": null,
+   "reference": null
+  }
+ },
+ {
+  "id": "602",
+  "administration_id": "100000000000000001",
+  "name": "Representatiekosten",
+  "account_type": "expenses",
+  "account_id": null,
+  "parent_id": null,
+  "active": true,
+  "created_at": "2023-01-02T09:00:00.000Z",
+  "updated_at": "2023-01-02T09:00:00.000Z",
+  "taxonomy_item": {
+   "taxonomy_version": "3.6",
+   "code": "WBedVkkRep",
+   "name": "Representatiekosten",
+   "name_english": null,
+   "reference": null
+  }
+ },
+ {
+  "id": "603",
+  "administration_id": "100000000000000001",
+  "name": "Lunch en diner met klanten",
+  "account_type": "expenses",
+  "account_id": null,
+  "parent_id": null,
+  "active": true,
+  "created_at": "2023-01-02T09:00:00.000Z",
+  "updated_at": "2023-01-02T09:00:00.000Z",
+  "taxonomy_item": null
+ },
+ {
+  "id": "604",
+  "administration_id": "100000000000000001",
+  "name": "Afschrijving inventaris",
+  "account_type": "expenses",
+  "account_id": null,
+  "parent_id": null,
+  "active": true,
+  "created_at": "2023-01-02T09:00:00.000Z",
+  "updated_at": "2023-01-02T09:00:00.000Z",
+  "taxonomy_item": {
+   "taxonomy_version": "3.6",
+   "code": "WAfsAmvBei",
+   "name": "Afschrijvingen inventaris",
+   "name_english": null,
+   "reference": null
+  }
+ },
+ {
+  "id": "605",
+  "administration_id": "100000000000000001",
+  "name": "Brandstof",
+  "account_type": "expenses",
+  "account_id": null,
+  "parent_id": null,
+  "active": true,
+  "created_at": "2023-01-02T09:00:00.000Z",
+  "updated_at": "2023-01-02T09:00:00.000Z",
+  "taxonomy_item": {
+   "taxonomy_version": "3.6",
+   "code": "WBedAutBra",
+   "name": "Brandstofkosten auto's en andere vervoermiddelen",
+   "name_english": null,
+   "reference": null
+  }
+ },
+ {
+  "id": "606",
+  "administration_id": "100000000000000001",
+  "name": "Automatiseringskosten",
+  "account_type": "expenses",
+  "account_id": null,
+  "parent_id": null,
+  "active": true,
+  "created_at": "2023-01-02T09:00:00.000Z",
+  "updated_at": "2023-01-02T09:00:00.000Z",
+  "taxonomy_item": null
+ },
+ {
+  "id": "607",
+  "administration_id": "100000000000000001",
+  "name": "Bankkosten",
+  "account_type": "expenses",
+  "account_id": null,
+  "parent_id": null,
+  "active": true,
+  "created_at": "2023-01-02T09:00:00.000Z",
+  "updated_at": "2023-01-02T09:00:00.000Z",
+  "taxonomy_item": {
+   "taxonomy_version": "3.6",
+   "code": "WBedAdlBan",
+   "name": "Bankkosten",
+   "name_english": null,
+   "reference": null
+  }
+ },
+ {
+  "id": "608",
+  "administration_id": "100000000000000001",
+  "name": "Kilometervergoeding",
+  "account_type": "expenses",
+  "account_id": null,
+  "parent_id": null,
+  "active": true,
+  "created_at": "2023-01-02T09:00:00.000Z",
+  "updated_at": "2023-01-02T09:00:00.000Z",
+  "taxonomy_item": {
+   "taxonomy_version": "3.6",
+   "code": "WBedVkkKmz",
+   "name": "Kilometervergoeding zakelijke reizen",
+   "name_english": null,
+   "reference": null
+  }
+ },
+ {
+  "id": "701",
+  "administration_id": "100000000000000001",
+  "name": "Rente bank",
+  "account_type": "other_income_expenses",
+  "account_id": null,
+  "parent_id": null,
+  "active": true,
+  "created_at": "2023-01-02T09:00:00.000Z",
+  "updated_at": "2023-01-02T09:00:00.000Z",
+  "taxonomy_item": {
+   "taxonomy_version": "3.6",
+   "code": "WFbeRlmObr",
+   "name": "Rentebaten bankrekeningen",
+   "name_english": null,
+   "reference": null
+  }
+ },
+ {
+  "id": "702",
+  "administration_id": "100000000000000001",
+  "name": "Rente lening",
+  "account_type": "other_income_expenses",
+  "account_id": null,
+  "parent_id": null,
+  "active": true,
+  "created_at": "2023-01-02T09:00:00.000Z",
+  "updated_at": "2023-01-02T09:00:00.000Z",
+  "taxonomy_item": {
+   "taxonomy_version": "3.6",
+   "code": "WFbeRlsRle",
+   "name": "Rentelasten overige leningen",
+   "name_english": null,
+   "reference": null
+  }
+ },
+ {
+  "id": "101",
+  "administration_id": "100000000000000001",
+  "name": "Inventaris",
+  "account_type": "non_current_assets",
+  "account_id": null,
+  "parent_id": null,
+  "active": true,
+  "created_at": "2023-01-02T09:00:00.000Z",
+  "updated_at": "2023-01-02T09:00:00.000Z",
+  "taxonomy_item": {
+   "taxonomy_version": "3.6",
+   "code": "BMvaBeiVvp",
+   "name": "Inventaris",
+   "name_english": null,
+   "reference": null
+  }
+ },
+ {
+  "id": "104",
+  "administration_id": "100000000000000001",
+  "name": "Vervoermiddelen",
+  "account_type": "non_current_assets",
+  "account_id": null,
+  "parent_id": null,
+  "active": true,
+  "created_at": "2023-01-02T09:00:00.000Z",
+  "updated_at": "2023-01-02T09:00:00.000Z",
+  "taxonomy_item": {
+   "taxonomy_version": "3.6",
+   "code": "BMvaTevVvp",
+   "name": "Auto's en overige transportmiddelen",
+   "name_english": null,
+   "reference": null
+  }
+ },
+ {
+  "id": "102",
+  "administration_id": "100000000000000001",
+  "name": "Onderhanden werk",
+  "account_type": "current_assets",
+  "account_id": null,
+  "parent_id": null,
+  "active": true,
+  "created_at": "2023-01-02T09:00:00.000Z",
+  "updated_at": "2023-01-02T09:00:00.000Z",
+  "taxonomy_item": {
+   "taxonomy_version": "3.6",
+   "code": "BVrdOweVoo",
+   "name": "Voorraad onderhanden werk",
+   "name_english": null,
+   "reference": null
+  }
+ },
+ {
+  "id": "105",
+  "administration_id": "100000000000000001",
+  "name": "Debiteuren",
+  "account_type": "current_assets",
+  "account_id": null,
+  "parent_id": null,
+  "active": true,
+  "created_at": "2023-01-02T09:00:00.000Z",
+  "updated_at": "2023-01-02T09:00:00.000Z",
+  "taxonomy_item": {
+   "taxonomy_version": "3.6",
+   "code": "BVorDebHad",
+   "name": "Debiteuren",
+   "name_english": null,
+   "reference": null
+  }
+ },
+ {
+  "id": "106",
+  "administration_id": "100000000000000001",
+  "name": "Vooruitbetaalde kosten",
+  "account_type": "current_assets",
+  "account_id": null,
+  "parent_id": null,
+  "active": true,
+  "created_at": "2023-01-02T09:00:00.000Z",
+  "updated_at": "2023-01-02T09:00:00.000Z",
+  "taxonomy_item": {
+   "taxonomy_version": "3.6",
+   "code": "BVorOvaVof",
+   "name": "Vooruitbetaalde facturen",
+   "name_english": null,
+   "reference": null
+  }
+ },
+ {
+  "id": "107",
+  "administration_id": "100000000000000001",
+  "name": "Waarborgsom kantoor",
+  "account_type": "current_assets",
+  "account_id": null,
+  "parent_id": null,
+  "active": true,
+  "created_at": "2023-01-02T09:00:00.000Z",
+  "updated_at": "2023-01-02T09:00:00.000Z",
+  "taxonomy_item": {
+   "taxonomy_version": "3.6",
+   "code": "BVorOvrWbs",
+   "name": "Waarborgsommen",
+   "name_english": null,
+   "reference": null
+  }
+ },
+ {
+  "id": "109",
+  "administration_id": "100000000000000001",
+  "name": "Te vorderen btw",
+  "account_type": "current_assets",
+  "account_id": null,
+  "parent_id": null,
+  "active": true,
+  "created_at": "2023-01-02T09:00:00.000Z",
+  "updated_at": "2023-01-02T09:00:00.000Z",
+  "taxonomy_item": {
+   "taxonomy_version": "3.6",
+   "code": "BVorVbkTvo",
+   "name": "Terug te vorderen Omzetbelasting",
+   "name_english": null,
+   "reference": null
+  }
+ },
+ {
+  "id": "103",
+  "administration_id": "100000000000000001",
+  "name": "Bank",
+  "account_type": "current_assets",
+  "account_id": null,
+  "parent_id": null,
+  "active": true,
+  "created_at": "2023-01-02T09:00:00.000Z",
+  "updated_at": "2023-01-02T09:00:00.000Z",
+  "taxonomy_item": {
+   "taxonomy_version": "3.6",
+   "code": "BLimBanRba",
+   "name": "Bankrekening",
+   "name_english": null,
+   "reference": null
+  }
+ },
+ {
+  "id": "108",
+  "administration_id": "100000000000000001",
+  "name": "Spaarrekening",
+  "account_type": "current_assets",
+  "account_id": null,
+  "parent_id": "103",
+  "active": true,
+  "created_at": "2023-01-02T09:00:00.000Z",
+  "updated_at": "2023-01-02T09:00:00.000Z",
+  "taxonomy_item": {
+   "taxonomy_version": "3.6",
+   "code": "BLimBanRbb",
+   "name": "Bankrekening B",
+   "name_english": null,
+   "reference": null
+  }
+ },
+ {
+  "id": "110",
+  "administration_id": "100000000000000001",
+  "name": "Kas",
+  "account_type": "current_assets",
+  "account_id": null,
+  "parent_id": null,
+  "active": true,
+  "created_at": "2023-01-02T09:00:00.000Z",
+  "updated_at": "2023-01-02T09:00:00.000Z",
+  "taxonomy_item": null
+ },
+ {
+  "id": "201",
+  "administration_id": "100000000000000001",
+  "name": "Ondernemingsvermogen",
+  "account_type": "equity",
+  "account_id": null,
+  "parent_id": null,
+  "active": true,
+  "created_at": "2023-01-02T09:00:00.000Z",
+  "updated_at": "2023-01-02T09:00:00.000Z",
+  "taxonomy_item": {
+   "taxonomy_version": "3.6",
+   "code": "BEivKapOnd",
+   "name": "Ondernemingsvermogen exclusief fiscale reserves",
+   "name_english": null,
+   "reference": null
+  }
+ },
+ {
+  "id": "202",
+  "administration_id": "100000000000000001",
+  "name": "Oudedagsreserve",
+  "account_type": "equity",
+  "account_id": null,
+  "parent_id": null,
+  "active": true,
+  "created_at": "2023-01-02T09:00:00.000Z",
+  "updated_at": "2023-01-02T09:00:00.000Z",
+  "taxonomy_item": {
+   "taxonomy_version": "3.6",
+   "code": "BEivFirFor",
+   "name": "Fiscale oudedagsreserve",
+   "name_english": null,
+   "reference": null
+  }
+ },
+ {
+  "id": "203",
+  "administration_id": "100000000000000001",
+  "name": "Privé-opnamen",
+  "account_type": "equity",
+  "account_id": null,
+  "parent_id": null,
+  "active": true,
+  "created_at": "2023-01-02T09:00:00.000Z",
+  "updated_at": "2023-01-02T09:00:00.000Z",
+  "taxonomy_item": {
+   "taxonomy_version": "3.6",
+   "code": "BEivKapPro",
+   "name": "Privé-opnamen",
+   "name_english": null,
+   "reference": null
+  }
+ },
+ {
+  "id": "204",
+  "administration_id": "100000000000000001",
+  "name": "Inkomstenbelasting en Zvw",
+  "account_type": "equity",
+  "account_id": null,
+  "parent_id": null,
+  "active": true,
+  "created_at": "2023-01-02T09:00:00.000Z",
+  "updated_at": "2023-01-02T09:00:00.000Z",
+  "taxonomy_item": {
+   "taxonomy_version": "3.6",
+   "code": "BEivKapPbe",
+   "name": "Privé-belastingen",
+   "name_english": null,
+   "reference": null
+  }
+ },
+ {
+  "id": "205",
+  "administration_id": "100000000000000001",
+  "name": "Lijfrentepremie",
+  "account_type": "equity",
+  "account_id": null,
+  "parent_id": null,
+  "active": true,
+  "created_at": "2023-01-02T09:00:00.000Z",
+  "updated_at": "2023-01-02T09:00:00.000Z",
+  "taxonomy_item": {
+   "taxonomy_version": "3.6",
+   "code": "BEivKapPpr",
+   "name": "Privé-premies",
+   "name_english": null,
+   "reference": null
+  }
+ },
+ {
+  "id": "206",
+  "administration_id": "100000000000000001",
+  "name": "Privé-stortingen",
+  "account_type": "equity",
+  "account_id": null,
+  "parent_id": null,
+  "active": true,
+  "created_at": "2023-01-02T09:00:00.000Z",
+  "updated_at": "2023-01-02T09:00:00.000Z",
+  "taxonomy_item": {
+   "taxonomy_version": "3.6",
+   "code": "BEivKapPrs",
+   "name": "Privé-stortingen",
+   "name_english": null,
+   "reference": null
+  }
+ },
+ {
+  "id": "207",
+  "administration_id": "100000000000000001",
+  "name": "Lening familie",
+  "account_type": "non_current_liabilities",
+  "account_id": null,
+  "parent_id": null,
+  "active": true,
+  "created_at": "2023-01-02T09:00:00.000Z",
+  "updated_at": "2023-01-02T09:00:00.000Z",
+  "taxonomy_item": null
+ },
+ {
+  "id": "208",
+  "administration_id": "100000000000000001",
+  "name": "Financiering bestelbus",
+  "account_type": "non_current_liabilities",
+  "account_id": null,
+  "parent_id": null,
+  "active": true,
+  "created_at": "2023-01-02T09:00:00.000Z",
+  "updated_at": "2023-01-02T09:00:00.000Z",
+  "taxonomy_item": {
+   "taxonomy_version": "3.6",
+   "code": "BLasSakFvl",
+   "name": "Financieringen van kredietinstellingen (langlopend)",
+   "name_english": null,
+   "reference": null
+  }
+ },
+ {
+  "id": "301",
+  "administration_id": "100000000000000001",
+  "name": "Crediteuren",
+  "account_type": "current_liabilities",
+  "account_id": null,
+  "parent_id": null,
+  "active": true,
+  "created_at": "2023-01-02T09:00:00.000Z",
+  "updated_at": "2023-01-02T09:00:00.000Z",
+  "taxonomy_item": {
+   "taxonomy_version": "3.6",
+   "code": "BSchCreHac",
+   "name": "Handelscrediteuren",
+   "name_english": null,
+   "reference": null
+  }
+ },
+ {
+  "id": "302",
+  "administration_id": "100000000000000001",
+  "name": "Te betalen btw",
+  "account_type": "current_liabilities",
+  "account_id": null,
+  "parent_id": null,
+  "active": true,
+  "created_at": "2023-01-02T09:00:00.000Z",
+  "updated_at": "2023-01-02T09:00:00.000Z",
+  "taxonomy_item": {
+   "taxonomy_version": "3.6",
+   "code": "BSchBepBtw",
+   "name": "Te betalen Omzetbelasting",
+   "name_english": null,
+   "reference": null
+  }
+ },
+ {
+  "id": "303",
+  "administration_id": "100000000000000001",
+  "name": "Nog te betalen kosten",
+  "account_type": "current_liabilities",
+  "account_id": null,
+  "parent_id": null,
+  "active": true,
+  "created_at": "2023-01-02T09:00:00.000Z",
+  "updated_at": "2023-01-02T09:00:00.000Z",
+  "taxonomy_item": {
+   "taxonomy_version": "3.6",
+   "code": "BSchOpaNtb",
+   "name": "Nog te betalen andere kosten",
+   "name_english": null,
+   "reference": null
+  }
+ }
+]

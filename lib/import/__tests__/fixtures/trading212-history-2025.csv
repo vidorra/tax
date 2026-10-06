@@ -1,0 +1,9 @@
+Action,Time,ISIN,Ticker,Name,No. of shares,Price / share,Currency (Price / share),Exchange rate,Result,Currency (Result),Total,Currency (Total),Withholding tax,Currency (Withholding tax),Notes,ID,Currency conversion fee,Currency (Currency conversion fee)
+Deposit,2025-01-08 09:12:44.512,,,,,,,,,,2000.00,"EUR",,,"Transaction ID: 00000000TESTDEP1",3f1d0c2a-0000-4000-8000-000000000001,,
+Market buy,2025-01-09 15:30:02.118,US9999NLT017,NLTC,"Noorderlicht Technologies",5.0000000000,155.20,USD,1.03120,,"EUR",753.65,"EUR",,,,EOF0000000001,1.13,"EUR"
+Market buy,2025-01-09 15:31:40.007,NL0099990010,PWH,"Polderwerk Holding",10.0000000000,48.90,EUR,1.00000,,"EUR",489.00,"EUR",,,,EOF0000000002,,
+Dividend (Dividend),2025-03-11 12:05:25,US9999NLT017,NLTC,"Noorderlicht Technologies",5.0000000000,0.30,USD,Not available,,,1.17,"EUR",0.23,USD,,,,
+Interest on cash,2025-03-31 22:06:41.36,,,,,,,,,,1.84,"EUR",,,"Interest on cash",8f0a1b2c-0000-4000-8000-000000000002,,
+Dividend (Dividend),2025-04-23 09:32:51,NL0099990010,PWH,"Polderwerk Holding",10.0000000000,1.25,EUR,Not available,,,10.62,"EUR",1.88,EUR,,,,
+Market sell,2025-08-14 15:30:05.104,NL0099990010,PWH,"Polderwerk Holding",4.0000000000,52.40,EUR,1.00000,13.99,"EUR",209.60,"EUR",,,,EOF0000000003,,
+Withdrawal,2025-11-20 10:01:12.004+00:00,,,,,,,,,,-300.00,"EUR",,,"Sent to Bank Account NL00TEST0000000000",3f1d0c2a-0000-4000-8000-000000000004,,

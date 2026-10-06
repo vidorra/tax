@@ -1,0 +1,162 @@
+[
+ {
+  "id": "901",
+  "administration_id": "100000000000000001",
+  "name": "Werkstation",
+  "ledger_account_id": "101",
+  "purchase_date": "2025-03-14",
+  "purchase_value": "3200.0",
+  "current_value": "2533.3",
+  "value_change_plan": {
+   "lifespan_in_years": 4,
+   "residual_value": "0.0",
+   "monthly_depreciation": "66.67"
+  },
+  "disposal": null,
+  "value_changes": [
+   {
+    "id": "954",
+    "date": "2025-04-27",
+    "amount": "-66.67",
+    "description": "Afschrijving"
+   },
+   {
+    "id": "955",
+    "date": "2025-05-27",
+    "amount": "-66.67",
+    "description": "Afschrijving"
+   },
+   {
+    "id": "956",
+    "date": "2025-06-27",
+    "amount": "-66.67",
+    "description": "Afschrijving"
+   },
+   {
+    "id": "957",
+    "date": "2025-07-27",
+    "amount": "-66.67",
+    "description": "Afschrijving"
+   },
+   {
+    "id": "958",
+    "date": "2025-08-27",
+    "amount": "-66.67",
+    "description": "Afschrijving"
+   },
+   {
+    "id": "959",
+    "date": "2025-09-27",
+    "amount": "-66.67",
+    "description": "Afschrijving"
+   },
+   {
+    "id": "9510",
+    "date": "2025-10-27",
+    "amount": "-66.67",
+    "description": "Afschrijving"
+   },
+   {
+    "id": "9511",
+    "date": "2025-11-27",
+    "amount": "-66.67",
+    "description": "Afschrijving"
+   },
+   {
+    "id": "9512",
+    "date": "2025-12-27",
+    "amount": "-66.67",
+    "description": "Afschrijving"
+   },
+   {
+    "id": "9601",
+    "date": "2026-01-31",
+    "amount": "-66.67",
+    "description": "Afschrijving"
+   }
+  ]
+ },
+ {
+  "id": "902",
+  "administration_id": "100000000000000001",
+  "name": "Bureaustoel",
+  "ledger_account_id": "101",
+  "purchase_date": "2022-06-01",
+  "purchase_value": "650.0",
+  "current_value": "0.0",
+  "value_change_plan": {
+   "lifespan_in_years": 5,
+   "residual_value": "0.0",
+   "monthly_depreciation": "10.83"
+  },
+  "disposal": {
+   "date": "2025-09-30",
+   "reason": "sold",
+   "sale_price": "150.0"
+  },
+  "value_changes": []
+ },
+ {
+  "id": "903",
+  "administration_id": "100000000000000001",
+  "name": "Elektrische personenauto",
+  "ledger_account_id": "104",
+  "purchase_date": "2025-05-01",
+  "purchase_value": "45000.0",
+  "current_value": "39000.0",
+  "value_change_plan": {
+   "lifespan_in_years": 5,
+   "residual_value": "15000.0",
+   "monthly_depreciation": "500.0"
+  },
+  "disposal": null,
+  "value_changes": null
+ },
+ {
+  "id": "904",
+  "administration_id": "100000000000000001",
+  "name": "Monitor",
+  "ledger_account_id": "101",
+  "purchase_date": "2021-01-10",
+  "purchase_value": "400.0",
+  "current_value": "0.0",
+  "value_change_plan": null,
+  "disposal": null
+ },
+ {
+  "id": "905",
+  "administration_id": "100000000000000001",
+  "name": "Server",
+  "ledger_account_id": "101",
+  "purchase_date": "2026-02-01",
+  "purchase_value": "2000.0",
+  "current_value": "1900.0",
+  "value_change_plan": null,
+  "disposal": null
+ },
+ {
+  "id": "906",
+  "administration_id": "100000000000000001",
+  "name": "Bestelbus",
+  "ledger_account_id": "104",
+  "purchase_date": "2025-11-01",
+  "purchase_value": "18000.0",
+  "current_value": "17700.0",
+  "value_change_plan": {
+   "lifespan_in_years": 5,
+   "residual_value": "3000.0",
+   "monthly_depreciation": "250.0"
+  },
+  "disposal": null,
+  "value_changes": [
+   {
+    "date": "2025-11-30",
+    "amount": "-250.0"
+   },
+   {
+    "date": "2025-12-31",
+    "amount": "-250.0"
+   }
+  ]
+ }
+]

@@ -1,0 +1,251 @@
+{
+  "omschrijving": "Verzonnen voorbeeldhuishouden 2021 (hetzelfde huishouden als in huishouden-2024.json, nog zonder kind): twee partners met elk een eenmanszaak, eigen woning, box 3 onder het heffingsvrij vermogen zonder eindstanden, scholingsuitgaven van A en lijfrente. Alle bedragen en namen zijn verzonnen.",
+  "invoer": {
+    "jaar": 2021,
+    "fiscaalPartner": true,
+    "kinderen": [],
+    "personen": [
+      {
+        "id": "A",
+        "geboortedatum": "1983-09-21",
+        "ondernemingen": [
+          {
+            "naam": "Meubelmakerij",
+            "winstberekening": {
+              "soort": "saldo",
+              "saldo": 98100
+            },
+            "beperktAftrekbaar": 860,
+            "investeringen": [
+              {
+                "omschrijving": "Werkbank",
+                "datum": "2021-05-18",
+                "bedrag": 3400,
+                "regeling": "kia"
+              }
+            ],
+            "for": {
+              "stand": 6900,
+              "ondernemingsvermogenEinde": 58280
+            },
+            "uren": {
+              "onderneming": 1740
+            },
+            "startjaar": 2016,
+            "jaarrekening": {
+              "begin": {
+                "materieleVasteActiva": 2200,
+                "voorraden": 1800,
+                "handelsdebiteuren": 9900,
+                "overigeVorderingen": 250,
+                "liquideMiddelen": 21350,
+                "oudedagsreserve": 6900,
+                "crediteuren": 900,
+                "omzetbelasting": 4100,
+                "overigeKortlopendeSchulden": 400
+              },
+              "eind": {
+                "materieleVasteActiva": 4450,
+                "voorraden": 2100,
+                "handelsdebiteuren": 13200,
+                "overigeVorderingen": 250,
+                "liquideMiddelen": 45030,
+                "oudedagsreserve": 6900,
+                "crediteuren": 1050,
+                "omzetbelasting": 5300,
+                "overigeKortlopendeSchulden": 400
+              },
+              "mva": {
+                "aanschafwaarde": 9600,
+                "restwaarde": 0
+              },
+              "specificaties": [
+                {
+                  "post": "overigeVorderingen",
+                  "omschrijving": "Borg werkplaats",
+                  "begin": 250,
+                  "eind": 250
+                },
+                {
+                  "post": "omzetbelasting",
+                  "omschrijving": "Schuld aan omzetbelasting over dit boekjaar",
+                  "begin": 0,
+                  "eind": 5300
+                },
+                {
+                  "post": "omzetbelasting",
+                  "omschrijving": "Schuld aan omzetbelasting over vorig boekjaar",
+                  "begin": 4100,
+                  "eind": 0
+                }
+              ],
+              "onttrekkingen": [
+                {
+                  "omschrijving": "Privé opnamen",
+                  "bedrag": 34500
+                },
+                {
+                  "omschrijving": "Lijfrentepremie",
+                  "bedrag": 6200
+                },
+                {
+                  "omschrijving": "AOV",
+                  "bedrag": 3020
+                },
+                {
+                  "omschrijving": "Inkomstenbelasting en Zvw",
+                  "bedrag": 27400
+                }
+              ],
+              "stortingen": [
+                {
+                  "omschrijving": "Stortingen",
+                  "bedrag": 1200
+                }
+              ],
+              "winstEnVerlies": [
+                {
+                  "rubriek": "omzet",
+                  "bedrag": 132900
+                },
+                {
+                  "rubriek": "onderhandenWerk",
+                  "bedrag": 300
+                },
+                {
+                  "rubriek": "inkoop",
+                  "bedrag": 14900
+                },
+                {
+                  "rubriek": "afschrijvingen",
+                  "bedrag": 1150
+                },
+                {
+                  "rubriek": "auto",
+                  "bedrag": 4250
+                },
+                {
+                  "rubriek": "huisvesting",
+                  "bedrag": 8400
+                },
+                {
+                  "rubriek": "beperktAftrekbaar",
+                  "bedrag": 860
+                },
+                {
+                  "rubriek": "overig",
+                  "bedrag": 5750
+                },
+                {
+                  "rubriek": "financieleBaten",
+                  "bedrag": 210
+                }
+              ],
+              "omschrijvingActiviteiten": "Ontwerpen en maken van meubels op maat",
+              "bron": "handmatig"
+            }
+          }
+        ],
+        "loon": [],
+        "inkomensvoorziening": {
+          "lijfrentePremies": 6200,
+          "aovPremies": 3020,
+          "premiegrondslagInkomenVorigJaar": 92800,
+          "historie": [
+            {
+              "jaar": 2019,
+              "premiegrondslagInkomen": 71500,
+              "alGebruikt": 2000
+            },
+            {
+              "jaar": 2020,
+              "premiegrondslagInkomen": 84300,
+              "alGebruikt": 0
+            }
+          ]
+        },
+        "voorlopigeAanslagIB": 27400,
+        "voorlopigeAanslagZvw": 3400
+      },
+      {
+        "id": "B",
+        "geboortedatum": "1986-05-04",
+        "ondernemingen": [
+          {
+            "naam": "Tekstbureau",
+            "winstberekening": {
+              "soort": "saldo",
+              "saldo": 31800
+            },
+            "uren": {
+              "onderneming": 1290
+            },
+            "startjaar": 2019
+          }
+        ],
+        "loon": [],
+        "inkomensvoorziening": {
+          "lijfrentePremies": 0,
+          "aovPremies": 0
+        },
+        "voorlopigeAanslagIB": 0,
+        "voorlopigeAanslagZvw": 1100
+      }
+    ],
+    "eigenWoning": {
+      "woz": 338000,
+      "rente": 8940
+    },
+    "pga": {
+      "scholing": 2640
+    },
+    "box3": {
+      "posities": [
+        {
+          "id": "bank-nl",
+          "omschrijving": "Betaal- en spaarrekening",
+          "categorie": "bankNL",
+          "eigenaar": "A",
+          "waardeBegin": 22400
+        },
+        {
+          "id": "spaar-b",
+          "omschrijving": "Spaarrekening",
+          "categorie": "bankNL",
+          "eigenaar": "B",
+          "waardeBegin": 8100
+        },
+        {
+          "id": "beleggingen",
+          "omschrijving": "Beleggingsrekening",
+          "categorie": "beleggingen",
+          "eigenaar": "A",
+          "waardeBegin": 36900,
+          "dividendbelasting": 21
+        },
+        {
+          "id": "crypto",
+          "omschrijving": "Cryptovaluta",
+          "categorie": "crypto",
+          "eigenaar": "B",
+          "waardeBegin": 900
+        }
+      ],
+      "schulden": [
+        {
+          "id": "lening-auto",
+          "omschrijving": "Lening auto",
+          "eigenaar": "A",
+          "waardeBegin": 17900
+        }
+      ]
+    },
+    "verdeling": {
+      "eigenWoning": 1,
+      "pga": 1,
+      "box3": 1,
+      "box2": 1,
+      "dividendbelasting": 1
+    }
+  }
+}

@@ -1,0 +1,9 @@
+Transaction Time (CET),Transaction Category,Transaction Type,Transfer Type,Transaction Amount,Transaction Currency,Cash Balance Amount,Asset Id,Asset Name,Asset Quantity,Asset Price,Asset Currency,Currency Pair,Exchange Rate,Profit And Loss Amount,Profit And Loss Currency,Dividend Currency,Dividend Gross Amount,Dividend Net Amount,Dividend Tax Amount,Transaction Description
+2025-01-06 10:15:23.606000,deposits,Sepa Deposit,,500,EUR,500,,,,,,,,,,,,,,
+2025-01-07 13:37:29.383000,trades,Buy Trade,,-490.00,EUR,10.00,NL0099990010,Polderwerk Holding,10,49.00,EUR,,,,,,,,,Transaction Amount: 490.00
+2025-01-07 13:37:29.384000,fees,Trading Fee,,-1.00,EUR,9.00,NL0099990010,Polderwerk Holding,,,,,,,,,,,,
+2025-02-01 11:07:12.872000,fees,Subscription Fee,,-2.99,EUR,6.01,,,,,,,,,,,,,,
+2025-04-23 11:38:06.646000,dividends,Cash Dividend,,10.62,EUR,16.63,NL0099990010,Polderwerk Holding,,,,,,,,EUR,12.50,10.62,1.88,
+2025-08-25 11:38:06.646000,dividends,Cash Dividend,,4.25,EUR,20.88,NL0099990010,Polderwerk Holding,,,,,,,,,,,,
+2025-07-09 10:25:51.533000,interest,Interest Payment,,0.23,EUR,21.11,,,,,,,,,,,,,,
+2025-11-02 09:00:00.000000,withdrawals,Sepa Withdrawal,,-20.00,EUR,1.11,,,,,,,,,,,,,,

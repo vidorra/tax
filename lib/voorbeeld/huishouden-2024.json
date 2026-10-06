@@ -1,0 +1,288 @@
+{
+  "omschrijving": "Verzonnen voorbeeldhuishouden 2024: twee partners met elk een eenmanszaak, een kind in de dagopvang, een eigen woning, spaargeld, beleggingen met een beetje Amerikaanse bronbelasting en lijfrente. Alle bedragen en namen zijn verzonnen.",
+  "invoer": {
+    "jaar": 2024,
+    "fiscaalPartner": true,
+    "kinderen": [
+      {
+        "id": "kind-1",
+        "geboortedatum": "2022-11-17",
+        "opvang": [
+          {
+            "soort": "dagopvang",
+            "urenPerMaand": 72,
+            "uurtarief": 9.4,
+            "maanden": 12
+          }
+        ]
+      }
+    ],
+    "personen": [
+      {
+        "id": "A",
+        "geboortedatum": "1983-09-21",
+        "ondernemingen": [
+          {
+            "naam": "Meubelmakerij",
+            "winstberekening": {
+              "soort": "saldo",
+              "saldo": 152340
+            },
+            "beperktAftrekbaar": 1140,
+            "investeringen": [
+              {
+                "omschrijving": "Formaatzaag",
+                "datum": "2024-03-14",
+                "bedrag": 2950,
+                "regeling": "kia"
+              },
+              {
+                "omschrijving": "Laptop",
+                "datum": "2024-09-02",
+                "bedrag": 1480,
+                "regeling": "kia"
+              }
+            ],
+            "for": {
+              "stand": 9640,
+              "ondernemingsvermogenEinde": 97450
+            },
+            "uren": {
+              "onderneming": 1650
+            },
+            "startjaar": 2016,
+            "jaarrekening": {
+              "begin": {
+                "materieleVasteActiva": 3180,
+                "voorraden": 2400,
+                "handelsdebiteuren": 16850,
+                "overigeVorderingen": 250,
+                "liquideMiddelen": 46320,
+                "oudedagsreserve": 9640,
+                "crediteuren": 1120,
+                "omzetbelasting": 5830,
+                "overigeKortlopendeSchulden": 480
+              },
+              "eind": {
+                "materieleVasteActiva": 5750,
+                "voorraden": 3100,
+                "handelsdebiteuren": 21540,
+                "overigeVorderingen": 250,
+                "liquideMiddelen": 77020,
+                "oudedagsreserve": 9640,
+                "crediteuren": 1460,
+                "omzetbelasting": 8270,
+                "overigeKortlopendeSchulden": 480
+              },
+              "mva": {
+                "aanschafwaarde": 14900,
+                "restwaarde": 0
+              },
+              "specificaties": [
+                {
+                  "post": "overigeVorderingen",
+                  "omschrijving": "Borg werkplaats",
+                  "begin": 250,
+                  "eind": 250
+                },
+                {
+                  "post": "omzetbelasting",
+                  "omschrijving": "Schuld aan omzetbelasting over dit boekjaar",
+                  "begin": 0,
+                  "eind": 8270
+                },
+                {
+                  "post": "omzetbelasting",
+                  "omschrijving": "Schuld aan omzetbelasting over vorig boekjaar",
+                  "begin": 5830,
+                  "eind": 0
+                }
+              ],
+              "onttrekkingen": [
+                {
+                  "omschrijving": "Privé opnamen",
+                  "bedrag": 61400
+                },
+                {
+                  "omschrijving": "Lijfrentepremie",
+                  "bedrag": 9800
+                },
+                {
+                  "omschrijving": "AOV",
+                  "bedrag": 3460
+                },
+                {
+                  "omschrijving": "Inkomstenbelasting en Zvw",
+                  "bedrag": 44300
+                }
+              ],
+              "stortingen": [
+                {
+                  "omschrijving": "Stortingen",
+                  "bedrag": 2500
+                }
+              ],
+              "winstEnVerlies": [
+                {
+                  "rubriek": "omzet",
+                  "bedrag": 193900
+                },
+                {
+                  "rubriek": "onderhandenWerk",
+                  "bedrag": 700
+                },
+                {
+                  "rubriek": "inkoop",
+                  "bedrag": 18450
+                },
+                {
+                  "rubriek": "afschrijvingen",
+                  "bedrag": 1860
+                },
+                {
+                  "rubriek": "auto",
+                  "bedrag": 5240
+                },
+                {
+                  "rubriek": "huisvesting",
+                  "bedrag": 9600
+                },
+                {
+                  "rubriek": "beperktAftrekbaar",
+                  "bedrag": 1140
+                },
+                {
+                  "rubriek": "overig",
+                  "bedrag": 6380
+                },
+                {
+                  "rubriek": "financieleBaten",
+                  "bedrag": 410
+                }
+              ],
+              "omschrijvingActiviteiten": "Ontwerpen en maken van meubels op maat",
+              "bron": "handmatig"
+            }
+          }
+        ],
+        "loon": [],
+        "inkomensvoorziening": {
+          "lijfrentePremies": 9800,
+          "aovPremies": 3460,
+          "premiegrondslagInkomenVorigJaar": 149800,
+          "historie": [
+            {
+              "jaar": 2021,
+              "premiegrondslagInkomen": 79500,
+              "alGebruikt": 4000
+            },
+            {
+              "jaar": 2022,
+              "premiegrondslagInkomen": 118700,
+              "alGebruikt": 6500
+            },
+            {
+              "jaar": 2023,
+              "premiegrondslagInkomen": 127900,
+              "forToenameVorigJaar": 2740,
+              "alGebruikt": 0
+            }
+          ]
+        },
+        "voorlopigeAanslagIB": 43500,
+        "voorlopigeAanslagZvw": 3700
+      },
+      {
+        "id": "B",
+        "geboortedatum": "1986-05-04",
+        "ondernemingen": [
+          {
+            "naam": "Tekstbureau",
+            "winstberekening": {
+              "soort": "saldo",
+              "saldo": 46280
+            },
+            "uren": {
+              "onderneming": 1310
+            },
+            "startjaar": 2019
+          }
+        ],
+        "loon": [],
+        "inkomensvoorziening": {
+          "lijfrentePremies": 2400,
+          "aovPremies": 0,
+          "premiegrondslagInkomenVorigJaar": 43900
+        },
+        "voorlopigeAanslagIB": 1800,
+        "voorlopigeAanslagZvw": 1900
+      }
+    ],
+    "eigenWoning": {
+      "woz": 412000,
+      "rente": 7860
+    },
+    "box3": {
+      "posities": [
+        {
+          "id": "bank-nl",
+          "omschrijving": "Betaal- en spaarrekening",
+          "categorie": "bankNL",
+          "eigenaar": "A",
+          "waardeBegin": 50900,
+          "waardeEind": 50200
+        },
+        {
+          "id": "spaar-b",
+          "omschrijving": "Spaarrekening in Duitsland",
+          "categorie": "bankBuitenland",
+          "eigenaar": "B",
+          "waardeBegin": 9800,
+          "waardeEind": 5900
+        },
+        {
+          "id": "beleggingen",
+          "omschrijving": "Beleggingsrekening",
+          "categorie": "beleggingen",
+          "eigenaar": "A",
+          "waardeBegin": 74800,
+          "waardeEind": 83900,
+          "bronbelastingen": [
+            {
+              "id": "bb-1",
+              "land": "US",
+              "soort": "dividend",
+              "brutoInkomsten": 420,
+              "bedrag": 63
+            }
+          ],
+          "dividendbelasting": 38
+        },
+        {
+          "id": "crypto",
+          "omschrijving": "Cryptovaluta",
+          "categorie": "crypto",
+          "eigenaar": "B",
+          "waardeBegin": 2150,
+          "waardeEind": 3480
+        }
+      ],
+      "schulden": [
+        {
+          "id": "lening-auto",
+          "omschrijving": "Lening auto",
+          "eigenaar": "A",
+          "waardeBegin": 24000,
+          "waardeEind": 16250
+        }
+      ]
+    },
+    "verdeling": {
+      "eigenWoning": 1,
+      "pga": 1,
+      "box3": 1,
+      "box2": 1,
+      "dividendbelasting": 1
+    }
+  }
+}

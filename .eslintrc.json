@@ -1,0 +1,12 @@
+{
+  "extends": "next/core-web-vitals",
+  "overrides": [
+    {
+      "files": ["lib/tax/modules/**/*.ts"],
+      "excludedFiles": ["**/*.spec.ts"],
+      "rules": {
+        "no-magic-numbers": ["warn", { "ignore": [0, 1, -1, 2, 12, 100], "ignoreArrayIndexes": true, "ignoreDefaultValues": true }]
+      }
+    }
+  ]
+}

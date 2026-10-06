@@ -1,0 +1,19 @@
+{
+  "_bron": "Jaren zonder jaarmodule (2014-2020). Percentages, factor A, franchise, inkomensgrens en maximum jaarruimte uit de jaarruimtetabellen van Moneywise en Belastingdienst; reserveringsruimte 2017-2020 uit de tabellen van Moneywise en een pensioenaanbieder (categorie meer dan tien jaar voor de AOW-leeftijd). De reserveringsruimte 2014-2016 is afgeleid uit de hogere categorie gedeeld door 1,9745 (vaste verhouding 2017-2021) en daarom geschat.",
+  "jaren": {
+    "2014": { "status": "geschat", "pct": 0.155, "factorA": 7.2, "franchise": 11829, "inkomensgrens": 174286, "maxJaarruimte": 25181, "maxReserveringsruimte": 6990 },
+    "2015": { "status": "geschat", "pct": 0.138, "factorA": 6.5, "franchise": 11936, "inkomensgrens": 100000, "maxJaarruimte": 12153, "maxReserveringsruimte": 7053 },
+    "2016": { "status": "geschat", "pct": 0.138, "factorA": 6.5, "franchise": 11996, "inkomensgrens": 101519, "maxJaarruimte": 12355, "maxReserveringsruimte": 7089 },
+    "2017": { "status": "definitief", "pct": 0.138, "factorA": 6.5, "franchise": 12032, "inkomensgrens": 103317, "maxJaarruimte": 12598, "maxReserveringsruimte": 7110 },
+    "2018": { "status": "definitief", "pct": 0.133, "factorA": 6.27, "franchise": 12129, "inkomensgrens": 105075, "maxJaarruimte": 12362, "maxReserveringsruimte": 7167 },
+    "2019": { "status": "definitief", "pct": 0.133, "factorA": 6.27, "franchise": 12275, "inkomensgrens": 107593, "maxJaarruimte": 12678, "maxReserveringsruimte": 7254 },
+    "2020": { "status": "definitief", "pct": 0.133, "factorA": 6.27, "franchise": 12472, "inkomensgrens": 110111, "maxJaarruimte": 12986, "maxReserveringsruimte": 7371 }
+  },
+  "gemeenschappelijk": {
+    "regime": "pre-wtp",
+    "reserveringsruimtePctGrondslag": 0.17,
+    "terugkijkJaren": 7,
+    "maxJarenNaAOW": 0,
+    "saldomethodeMax": 2269
+  }
+}

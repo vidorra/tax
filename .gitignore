@@ -1,0 +1,39 @@
+node_modules
+.next
+out
+*.tsbuildinfo
+next-env.d.ts
+coverage
+
+# Omgeving en geheimen
+.env
+.env.*
+!.env.example
+
+# Alleen een map data/ in de root (lokale bestanden); lib/tax/years/data/ hoort wel in git
+/data/
+.DS_Store
+
+# Back-ups van de database (npm run backup -- maak), versleuteld maar nooit in git
+backups/
+*.ibcbak
+
+# Ronde 2: ontwikkelaccount per worktree (scripts/dev-account.ts)
+.dev-account.json
+
+# Regressietests en fixtures met echte aangiftes: alleen lokaal (zie README, "Tests")
+**/prive/
+
+# Brondocumenten (aangiftes, facturen, schermafbeeldingen) en uitvoer van scripts/rapport-voorbeeld.ts horen niet in git
+*.pdf
+*.PDF
+*.xlsx
+WhatsApp*
+# Afbeeldingen alleen in public/ (geen schermafbeeldingen of scans van documenten)
+*.png
+*.jpg
+*.jpeg
+*.heic
+!public/**/*.png
+!public/**/*.jpg
+!public/**/*.jpeg

@@ -1,0 +1,14 @@
+[
+ {
+  "contact_id": "11",
+  "contact": {
+   "id": "11",
+   "company_name": "Bakkerij Noord BV"
+  },
+  "value": "70000.0"
+ },
+ {
+  "contact_id": "12",
+  "value": "35000.0"
+ }
+]

@@ -1,0 +1,80 @@
+﻿Statement,Header,Field Name,Field Value
+Statement,Data,BrokerName,Interactive Brokers Ireland Limited
+Statement,Data,Title,Activity Statement
+Statement,Data,Period,"January 1, 2025 - December 31, 2025"
+Statement,Data,WhenGenerated,"2026-01-09, 04:12:51 EST"
+Account Information,Header,Field Name,Field Value
+Account Information,Data,Name,Voorbeeld Belegger
+Account Information,Data,Account,U0000000
+Account Information,Data,Account Type,Individual
+Account Information,Data,Base Currency,EUR
+Net Asset Value,Header,Asset Class,Prior Total,Current Long,Current Short,Current Total,Change
+Net Asset Value,Data,Cash ,1250.40,336.18,0,336.18,-914.22
+Net Asset Value,Data,Stock,11760.00,16534.69,0,16534.69,4774.69
+Net Asset Value,Data,Total,13010.40,16870.87,0,16870.87,3860.47
+Change in NAV,Header,Field Name,Field Value
+Change in NAV,Data,Starting Value,13010.40
+Change in NAV,Data,Mark-to-Market,2174.69
+Change in NAV,Data,Deposits & Withdrawals,1500
+Change in NAV,Data,Dividends,250.35
+Change in NAV,Data,Withholding Tax,-51.75
+Change in NAV,Data,Interest,1.38
+Change in NAV,Data,Commissions,-14.20
+Change in NAV,Data,Ending Value,16870.87
+Open Positions,Header,DataDiscriminator,Asset Category,Currency,Symbol,Quantity,Mult,Cost Price,Cost Basis,Close Price,Value,Unrealized P/L,Code
+Open Positions,Data,Summary,Stocks,CHF,ALPK,25,1,64.08,1602.00,71.20,1780.00,178.00,
+Open Positions,Total,,Stocks,CHF,,,,,1602.00,,1780.00,178.00,
+Open Positions,Total,,Stocks,EUR,,,,,1704.26,,1893.62,189.36,
+Open Positions,Data,Summary,Stocks,USD,GDVD,80,1,35.64,2851.20,39.60,3168.00,316.80,
+Open Positions,Data,Summary,Stocks,USD,HYMG,30,1,66.69,2000.70,74.10,2223.00,222.30,
+Open Positions,Data,Summary,Stocks,USD,MAPM,120,1,19.22,2305.80,21.35,2562.00,256.20,
+Open Positions,Data,Summary,Stocks,USD,NLTC,50,1,152.01,7600.50,168.90,8445.00,844.50,
+Open Positions,Total,,Stocks,USD,,,,,14758.20,,16398.00,1639.80,
+Open Positions,Total,,Stocks,EUR,,,,,13176.96,,14641.07,1464.11,
+Open Positions,Total,,Stocks,EUR,,,,,,,16534.69,,
+Deposits & Withdrawals,Header,Currency,Settle Date,Description,Amount
+Deposits & Withdrawals,Data,EUR,2025-02-03,Electronic Fund Transfer,3000
+Deposits & Withdrawals,Data,EUR,2025-09-15,Disbursement Initiated by Voorbeeld Belegger,-1500
+Deposits & Withdrawals,Data,Total,,,1500
+Dividends,Header,Currency,Date,Description,Amount
+Dividends,Data,CHF,2025-05-08,ALPK(CH099999AK14) Cash Dividend CHF 2.40 per Share (Ordinary Dividend),60.00
+Dividends,Data,Total,,,60.00
+Dividends,Data,Total in EUR,,,63.83
+Dividends,Data,USD,2025-03-14,NLTC(US9999NLT017) Cash Dividend USD 0.30 per Share (Ordinary Dividend),15.00
+Dividends,Data,USD,2025-04-15,MAPM(CA99999MM015) Cash Dividend USD 0.155 per Share (Ordinary Dividend),18.60
+Dividends,Data,USD,2025-04-25,HYMG(USY99999HM15) Cash Dividend USD 3.10 per Share (Ordinary Dividend),93.00
+Dividends,Data,USD,2025-06-13,NLTC(US9999NLT017) Cash Dividend USD 0.30 per Share (Ordinary Dividend),15.00
+Dividends,Data,USD,2025-06-25,GDVD(IE00ZZGDV017) Cash Dividend USD 0.42 per Share (Ordinary Dividend),33.60
+Dividends,Data,USD,2025-09-12,NLTC(US9999NLT017) Cash Dividend USD 0.30 per Share (Ordinary Dividend),15.00
+Dividends,Data,USD,2025-09-12,NLTC(US9999NLT017) Payment in Lieu of Dividend (Ordinary Dividend),1.20
+Dividends,Data,USD,2025-12-12,NLTC(US9999NLT017) Cash Dividend USD 0.35 per Share (Ordinary Dividend),17.50
+Dividends,Data,Total,,,208.90
+Dividends,Data,Total in EUR,,,186.52
+Dividends,Data,Total Dividends in EUR,,,250.35
+Withholding Tax,Header,Currency,Date,Description,Amount,Code
+Withholding Tax,Data,CHF,2025-05-08,ALPK(CH099999AK14) Cash Dividend CHF 2.40 per Share - CH Tax,-21.00,
+Withholding Tax,Data,Total,,,-21.00,
+Withholding Tax,Data,Total in EUR,,,-22.34,
+Withholding Tax,Data,USD,2025-03-14,NLTC(US9999NLT017) Cash Dividend USD 0.30 per Share - US Tax,-2.25,
+Withholding Tax,Data,USD,2025-04-03,Withholding @ 20% on Credit Interest for Mar-2025,-0.31,
+Withholding Tax,Data,USD,2025-04-15,MAPM(CA99999MM015) Cash Dividend USD 0.155 per Share - CA Tax,-2.79,
+Withholding Tax,Data,USD,2025-04-25,HYMG(USY99999HM15) Cash Dividend USD 3.10 per Share - KR Tax,-20.46,
+Withholding Tax,Data,USD,2025-06-13,NLTC(US9999NLT017) Cash Dividend USD 0.30 per Share - US Tax,-2.25,
+Withholding Tax,Data,USD,2025-06-20,NLTC(US9999NLT017) Cash Dividend USD 0.30 per Share - US Tax,2.25,
+Withholding Tax,Data,USD,2025-06-20,NLTC(US9999NLT017) Cash Dividend USD 0.30 per Share - US Tax,-2.25,
+Withholding Tax,Data,USD,2025-09-12,NLTC(US9999NLT017) Cash Dividend USD 0.30 per Share - US Tax,-2.25,
+Withholding Tax,Data,USD,2025-12-12,NLTC(US9999NLT017) Cash Dividend USD 0.35 per Share - US Tax,-2.63,
+Withholding Tax,Data,Total,,,-32.94,
+Withholding Tax,Data,Total in EUR,,,-29.41,
+Withholding Tax,Data,Total Withholding Tax in EUR,,,-51.75,
+Interest,Header,Currency,Date,Description,Amount
+Interest,Data,USD,2025-04-03,USD Credit Interest for Mar-2025,1.55
+Interest,Data,Total,,,1.55
+Interest,Data,Total in EUR,,,1.38
+Interest,Data,Total Interest in EUR,,,1.38
+Financial Instrument Information,Header,Asset Category,Symbol,Description,Conid,Security ID,Underlying,Listing Exch,Multiplier,Type,Code
+Financial Instrument Information,Data,Stocks,ALPK,ALPENKAAS AG,900000001,CH099999AK14,ALPK,EBS,1,COMMON,
+Financial Instrument Information,Data,Stocks,GDVD,GLOBAL DIVIDEND UCITS ETF DIST,900000002,IE00ZZGDV017,GDVD,NYSE,1,ETF,
+Financial Instrument Information,Data,Stocks,HYMG,HANYANG MOTORS GDR,900000003,USY99999HM15,HYMG,NYSE,1,COMMON,
+Financial Instrument Information,Data,Stocks,MAPM,MAPLE MINING CORP,900000004,CA99999MM015,MAPM,NYSE,1,COMMON,
+Financial Instrument Information,Data,Stocks,NLTC,NOORDERLICHT TECHNOLOGIES INC,900000005,US9999NLT017,NLTC,NYSE,1,COMMON,

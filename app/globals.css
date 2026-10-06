@@ -1,0 +1,123 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --kleur-primair: 15 118 110;
+  --kleur-primair-donker: 17 94 89;
+  --achtergrond-warm: #fafaf7;
+  --tekst: #1f2937;
+  color-scheme: light;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+
+  html,
+  body {
+    font-family: var(--font-lexend-deca), ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  }
+
+  h1,
+  h2,
+  h3 {
+    overflow-wrap: break-word;
+  }
+
+  body {
+    background-color: var(--achtergrond-warm);
+    color: var(--tekst);
+    /* clip in plaats van hidden: geen horizontale scroll, en position: sticky blijft werken */
+    overflow-x: clip;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Vaste resultaatbalk op mobiel: velden met focus en de footer niet onder de balk laten vallen. */
+  @media (max-width: 1023.98px) {
+    html:has([data-mobiele-balk]) {
+      scroll-padding-bottom: 10rem;
+    }
+
+    body:has([data-mobiele-balk]) > div > footer {
+      padding-bottom: 10rem;
+    }
+  }
+
+  :focus-visible {
+    outline: 2px solid rgb(var(--kleur-primair));
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background-color: rgb(var(--kleur-primair) / 0.18);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer components {
+  /* Opmaak voor lopende tekst (kennisbank, over, privacy, disclaimer). */
+  .kb-prose {
+    @apply text-base leading-relaxed text-gray-700;
+    overflow-wrap: break-word;
+  }
+
+  .kb-prose h2,
+  .kb-prose h3 {
+    hyphens: auto;
+  }
+
+  .kb-prose > * + * {
+    @apply mt-4;
+  }
+
+  .kb-prose h2 {
+    @apply mt-10 scroll-mt-6 text-xl font-semibold leading-snug text-gray-900;
+  }
+
+  .kb-prose h3 {
+    @apply mt-8 scroll-mt-6 text-base font-semibold text-gray-900;
+  }
+
+  .kb-prose h2 + *,
+  .kb-prose h3 + * {
+    @apply mt-3;
+  }
+
+  .kb-prose ul {
+    @apply list-disc space-y-1.5 pl-5 marker:text-primary;
+  }
+
+  .kb-prose ol {
+    @apply list-decimal space-y-1.5 pl-5 marker:text-gray-500;
+  }
+
+  .kb-prose a {
+    @apply font-medium text-primary underline decoration-primary/30 underline-offset-2 transition-colors hover:text-primary-dark hover:decoration-primary-dark;
+  }
+
+  .kb-prose strong {
+    @apply font-semibold text-gray-900;
+  }
+
+  .kb-prose code {
+    @apply rounded bg-gray-100 px-1 py-0.5 text-sm text-gray-800;
+  }
+}

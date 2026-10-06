@@ -1,0 +1,8 @@
+Client ID,Trade Date,Value Date,Type,Instrument,Instrument ISIN,Instrument currency,Exchange Description,Instrument Symbol,Event,Amount,Order ID,Conversion Rate
+,03-Feb-2025,03-Feb-2025,Cash Transfer,,,EUR,Unknown,,Deposit,2500,,1
+,04-Feb-2025,06-Feb-2025,Trade,Global Index UCITS ETF Acc,IE00ZZGIX012,EUR,Euronext Amsterdam,GIXA:xams,Buy 20 @ 104.10 EUR,"-2085,00",5000000001,1
+,18-mrt-2025,20-mrt-2025,Transactie,Polderwerk Holding NV,NL0099990010,EUR,Euronext Amsterdam,PWH:xams,Koop 15 @ 49.20 EUR,"-741,00",5000000002,1
+,02-Apr-2025,02-Apr-2025,Corporate action,Global Dividend UCITS ETF Dist,IE00ZZGDV017,USD,London Stock Exchange (ETFs),GDVD:xlon,Dividend,"30,24",,0.92139706
+,23-Apr-2025,23-Apr-2025,Corporate action,Polderwerk Holding NV,NL0099990010,EUR,Euronext Amsterdam,PWH:xams,Dividend,"15,94",,1
+,02-Jan-2025,02-Jan-2025,Cash amount,,,EUR,,,Custody Fee,"-3,91",,1
+,15-Oct-2025,15-Oct-2025,Cash Transfer,,,EUR,Unknown,,Withdrawal,-750,,1
