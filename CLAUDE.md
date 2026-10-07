@@ -1,6 +1,6 @@
 # ibcalculator: conventies
 
-IB-aangiftetool voor zzp-huishoudens. Het plan (versie 2) staat buiten deze repository. Stack: Next.js 15 App Router, React 19, Tailwind 3.4, Drizzle + Postgres, Docker (CapRover). Tests met vitest.
+IB-aangiftetool voor zzp-huishoudens. Het plan (versie 2) staat buiten deze repository. Stack: Next.js 15 App Router, React 19, Tailwind 3.4, Drizzle + SQLite (better-sqlite3, één bestand in DATABASE_PATH), Docker (CapRover). Tests met vitest.
 
 ## Rekenkern (`lib/tax`)
 
@@ -20,6 +20,15 @@ IB-aangiftetool voor zzp-huishoudens. Het plan (versie 2) staat buiten deze repo
 - Elke wijziging krijgt een `changelog`-regel met datum en bron. Status per blok, afwijkingen per veld via `veldStatus`.
 - Varianten (twee voorstellen tegelijk, zoals 2027) via `varianten[].pas`.
 - Primaire bronnen gaan voor: MinFin-bijlage "Fiscale parameters", Belastingdienst jaarpagina's, Staatscourant/Staatsblad.
+
+## Database (`lib/db`)
+
+- Eén SQLite-bestand (`DATABASE_PATH`, standaard `data/ibcalculator.db` in de werkmap; in de container `/app/data`, een Persistent Directory). Geen databaseserver, geen `DATABASE_URL`. Instance count 1.
+- `getDb()` (Drizzle) en `getSqlite()` (ruw) openen lui. Schrijven dat uit meer dan één statement bestaat of eerst leest, gaat via `schrijf((tx) => ...)` (BEGIN IMMEDIATE). Die functie is synchroon: `.all()`, `.get()`, `.run()`, geen `await`. Async werk (hashen, fetch) ervoor of erna. Geen advisory locks of `FOR UPDATE`.
+- Tijdstippen zijn `Date` in de code en ISO-tekst (UTC) in de database (kolomtype `tijdstip`), booleans 0/1, JSON als tekst. In ruwe SQL geef je een `Date` als `.toISOString()` mee.
+- Schemawijziging: een nieuw bestand in `migrations/` (nooit een bestaand wijzigen) en `lib/db/schema.ts` gelijk houden; `lib/db/__tests__/schema.spec.ts` vergelijkt ze. Een tabel opnieuw opbouwen kan met de markering `-- migratie: zonder-foreign-keys` (zie `lib/db/migreer.ts`).
+- Tests met een database gebruiken `gebruikTijdelijkeDb()` uit `lib/db/testdb.ts`: een eigen, gemigreerd bestand per test. Ze draaien altijd.
+- Fouten van de database vertaal je met `dbFoutSoort(e)`; nooit inhoud van rijen in een melding of log.
 
 ## UI
 

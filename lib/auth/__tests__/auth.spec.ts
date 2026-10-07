@@ -121,10 +121,19 @@ describe('wachtwoord en configuratie', () => {
     expect(await controleerWachtwoord('x', null)).toBe(false)
   })
 
-  it('meldt ontbrekende omgevingsvariabelen', () => {
-    expect(configStatus({}).ontbreekt).toEqual(['DATABASE_URL', 'AUTH_SECRET', 'DOSSIER_KEY'])
-    const ok = configStatus({ DATABASE_URL: 'postgres://x', AUTH_SECRET: SECRET, DOSSIER_KEY: Buffer.alloc(32, 1).toString('base64') })
+  it('meldt ontbrekende omgevingsvariabelen en een databasemap die niet schrijfbaar is', () => {
+    const ja = () => true
+    const sleutel = Buffer.alloc(32, 1).toString('base64')
+    expect(configStatus({}, ja).ontbreekt).toEqual(['AUTH_SECRET', 'DOSSIER_KEY'])
+    const ok = configStatus({ AUTH_SECRET: SECRET, DOSSIER_KEY: sleutel }, ja)
     expect(ok.geconfigureerd).toBe(true)
-    expect(configStatus({ DATABASE_URL: 'postgres://x', AUTH_SECRET: 'kort', DOSSIER_KEY: 'abc' }).ontbreekt).toEqual(['AUTH_SECRET', 'DOSSIER_KEY'])
+    expect(configStatus({ AUTH_SECRET: 'kort', DOSSIER_KEY: 'abc' }, ja).ontbreekt).toEqual(['AUTH_SECRET', 'DOSSIER_KEY'])
+    const gevraagd: string[] = []
+    const nee = (pad: string) => {
+      gevraagd.push(pad)
+      return false
+    }
+    expect(configStatus({ AUTH_SECRET: SECRET, DOSSIER_KEY: sleutel, DATABASE_PATH: '/ergens/anders/ib.db' }, nee).ontbreekt).toEqual(['DATABASE_PATH'])
+    expect(gevraagd).toEqual(['/ergens/anders/ib.db'])
   })
 })

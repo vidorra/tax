@@ -7,7 +7,7 @@
  *  ib-setup   tussenstap bij het aanmaken van het account, 15 minuten
  */
 import { SignJWT, jwtVerify } from 'jose'
-import { MIN_AUTH_SECRET } from './config'
+import { MIN_AUTH_SECRET } from './grenzen'
 
 export const SESSIE_COOKIE = 'ib-sessie'
 export const TWEEFA_COOKIE = 'ib-2fa'

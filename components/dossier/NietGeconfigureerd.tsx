@@ -5,12 +5,8 @@ export function NietGeconfigureerd({ ontbreekt, titel = 'Privédossier' }: { ont
     <Container breedte="smal" className="pb-16">
       <PageHeader kicker="Dossier" titel={titel} />
       <Alert variant="actie" titel="Het dossier is nog niet ingericht">
-        <p>Het privédossier bewaart je gegevens versleuteld in een eigen database. Daarvoor zijn drie omgevingsvariabelen nodig:</p>
+        <p>Het privédossier bewaart je gegevens versleuteld in een databasebestand op de server. Daarvoor is dit nodig:</p>
         <ul className="mt-2 list-disc space-y-1 pl-5">
-          <li>
-            <code className="rounded bg-white px-1 py-0.5 text-xs">DATABASE_URL</code>: de Postgres-verbinding
-            {ontbreekt.includes('DATABASE_URL') && <strong className="font-medium"> (ontbreekt)</strong>}
-          </li>
           <li>
             <code className="rounded bg-white px-1 py-0.5 text-xs">AUTH_SECRET</code>: een willekeurige tekst van minimaal 32 tekens voor de sessies
             {ontbreekt.includes('AUTH_SECRET') && <strong className="font-medium"> (ontbreekt of te kort)</strong>}
@@ -18,6 +14,13 @@ export function NietGeconfigureerd({ ontbreekt, titel = 'Privédossier' }: { ont
           <li>
             <code className="rounded bg-white px-1 py-0.5 text-xs">DOSSIER_KEY</code>: 32 bytes als base64 voor de versleuteling
             {ontbreekt.includes('DOSSIER_KEY') && <strong className="font-medium"> (ontbreekt of ongeldig)</strong>}
+          </li>
+          <li>
+            Een map waarin de app mag schrijven, voor het databasebestand: standaard{' '}
+            <code className="rounded bg-white px-1 py-0.5 text-xs">data/</code> in de map van de app (in de container{' '}
+            <code className="rounded bg-white px-1 py-0.5 text-xs">/app/data</code>, als Persistent Directory). Een andere plek zet je met{' '}
+            <code className="rounded bg-white px-1 py-0.5 text-xs">DATABASE_PATH</code>
+            {ontbreekt.includes('DATABASE_PATH') && <strong className="font-medium"> (niet schrijfbaar)</strong>}
           </li>
         </ul>
         <p className="mt-3">Een sleutel maak je met:</p>
