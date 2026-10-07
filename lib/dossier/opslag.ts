@@ -10,7 +10,7 @@
  * zo toevoegen, vervangen, accountantsregels, aangiftestaat en herstelpunt in één transactie).
  */
 import { and, asc, desc, eq, inArray } from 'drizzle-orm'
-import { getDb, lees, schrijf, type Db, type Tx } from '@/lib/db'
+import { dbFoutSoort, getDb, leegWal, lees, schrijf, type Db, type Tx } from '@/lib/db'
 import { aangifteStaat, accountantDocs, dossierYears, households, koppelingen, snapshots, users, type DossierJaarRij } from '@/lib/db/schema'
 import { ontsleutel, paramsHash, versleutel } from '@/lib/crypto'
 import { exporteerKoppelingen } from '@/lib/moneybird/opslag'
@@ -528,7 +528,11 @@ export async function exporteer(userId: number) {
  * Verwijdert alle huishoudens (en via cascade jaren, snapshots, accountantsregels, aangiftestaat, herstelpunten en
  * koppelingen met hun versleutelde tokens); optioneel ook het account. Alles in één schrijf(): of alles is weg, of
  * niets. De koppelingen gaan er ook expliciet uit, zodat geen token achterblijft als de cascade ooit ontbreekt.
- * secure_delete staat aan (lib/db), dus SQLite overschrijft de verwijderde inhoud ook in het bestand.
+ *
+ * secure_delete staat aan (lib/db), dus SQLite overschrijft de verwijderde inhoud in het databasebestand. De oude
+ * pagina's staan dan nog in -wal; leegWal() schrijft de WAL meteen terug en maakt -wal leeg, met een paar
+ * herhaalpogingen als een ander proces de WAL nog gebruikt. Lukt dat niet, dan is het dossier wel verwijderd, staat er
+ * een waarschuwing in de log en blijven die pagina's (versleuteld) in -wal tot een volgende geslaagde checkpoint.
  */
 export async function verwijderAlles(userId: number, ookAccount: boolean): Promise<void> {
   schrijf((tx) => {
@@ -536,4 +540,12 @@ export async function verwijderAlles(userId: number, ookAccount: boolean): Promi
     tx.delete(households).where(eq(households.userId, userId)).run()
     if (ookAccount) tx.delete(users).where(eq(users.id, userId)).run()
   })
+  let leeg = false
+  try {
+    leeg = await leegWal()
+  } catch (e) {
+    console.warn(`Database: -wal legen na Alles verwijderen mislukt (${dbFoutSoort(e) ?? 'onbekende fout'})`)
+    return
+  }
+  if (!leeg) console.warn('Database: -wal na Alles verwijderen nog niet leeg, een ander proces gebruikt de WAL')
 }

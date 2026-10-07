@@ -4,6 +4,8 @@
 # De container start als root, alleen om de map van de database (de Persistent Directory /app/data) aan de
 # gebruiker node te geven. Een volume van CapRover of een map op de host is meestal van root; zonder deze stap kan
 # de app er niet in schrijven. Daarna draait alles als node, ook de migraties, zodat de bestanden van node blijven.
+# Zonder root of zonder su-exec (buiten de container, zoals een proef met de uitgepakte deploy.tar) slaat het script
+# die stap over en draait alles als de huidige gebruiker.
 set -e
 cd "$(dirname "$0")"
 

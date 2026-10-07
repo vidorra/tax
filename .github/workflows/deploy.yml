@@ -1,0 +1,102 @@
+name: Build & Deploy
+
+# Bouwen en testen gebeurt hier, niet op de server: die heeft te weinig geheugen voor npm ci met devDependencies en
+# next build. De kant-en-klare .next gaat met precies wat de container nodig heeft (scripts/deploy-tarball.sh) als
+# deploy.tar naar CapRover; de image installeert alleen de productie-afhankelijkheden. Voor de deploy bouwt deze job
+# de image uit dezelfde tarball en test hem (scripts/docker-rooktest.sh). Zie README, Deploy.
+#
+# GitHub heeft alleen de secrets CAPROVER_SERVER, APP_NAME en APP_TOKEN. Alle omgevingsvariabelen van de app
+# (AUTH_SECRET, DOSSIER_KEY, mail, Moneybird, TRUSTED_PROXY_HOPS) staan in CapRover en worden bij het draaien gelezen.
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-deploy-${{ github.ref }}
+  # Een nieuwe push op een pull request stopt de vorige run; deploys op main lopen na elkaar.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # De publieke URL van de site. next build zet hem vast in de pagina's (canonical, sitemap, robots, JSON-LD), dus in
+  # CapRover zetten heeft geen effect. Wijzigen: pas de URL hieronder aan en push naar main. Een repositoryvariabele
+  # NEXT_PUBLIC_SITE_URL gaat voor als je die ooit zet, maar nodig is hij niet.
+  SITE_URL: ${{ vars.NEXT_PUBLIC_SITE_URL || 'https://ibcalculator.server.devjens.nl' }}
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    env:
+      DEPLOY: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      # Alleen of de secrets er zijn, niet hun waarde: zo komen ze niet in de omgeving van npm ci, tests en build.
+      CAPROVER_KLAAR: ${{ secrets.CAPROVER_SERVER != '' && secrets.APP_NAME != '' && secrets.APP_TOKEN != '' }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: npm
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+      - name: Migrations on an empty SQLite file (as start.sh does)
+        run: npm run db:migrate
+        env:
+          DATABASE_PATH: ${{ runner.temp }}/ibcalculator-ci.db
+
+      - name: Parameter changelog check
+        run: npx tsx scripts/tax-diff.ts --check
+
+      - name: Build
+        run: |
+          case "$NEXT_PUBLIC_SITE_URL" in
+            https://*) echo "NEXT_PUBLIC_SITE_URL: $NEXT_PUBLIC_SITE_URL" ;;
+            *) echo "::error::SITE_URL in .github/workflows/deploy.yml moet met https:// beginnen." && exit 1 ;;
+          esac
+          npm run build
+        env:
+          NEXT_PUBLIC_SITE_URL: ${{ env.SITE_URL }}
+          # Optioneel, ook vast bij het bouwen. Zonder deze repositoryvariabelen draait de site zonder statistiek.
+          NEXT_PUBLIC_UMAMI_WEBSITE_ID: ${{ vars.NEXT_PUBLIC_UMAMI_WEBSITE_ID }}
+          NEXT_PUBLIC_UMAMI_SRC: ${{ vars.NEXT_PUBLIC_UMAMI_SRC }}
+
+      - name: Create deploy.tar
+        run: GIT_SHA="${GITHUB_SHA::7}" bash scripts/deploy-tarball.sh deploy.tar
+
+      # Wat CapRover doet: de tarball uitpakken en daaruit de image bouwen (linux/amd64, zoals de server). Daarna de
+      # rooktest: inhoud van de image, /api/health, /dossier/setup/, de database in /app/data van node, migreren,
+      # een account met 2FA, scripts/backup.ts en een nieuwe container met dezelfde opslag.
+      - name: Build Docker image from deploy.tar
+        run: |
+          mkdir -p "$RUNNER_TEMP/context"
+          tar -xf deploy.tar -C "$RUNNER_TEMP/context"
+          docker build --platform linux/amd64 -t ibcalculator-rooktest "$RUNNER_TEMP/context"
+
+      - name: Docker smoke test
+        run: ROOKTEST_VERSIE="${GITHUB_SHA::7}" bash scripts/docker-rooktest.sh
+        env:
+          ROOKTEST_BOUW: "0"
+          ROOKTEST_IMAGE: ibcalculator-rooktest
+          ROOKTEST_PLATFORM: linux/amd64
+
+      - name: Deploy to CapRover
+        if: env.DEPLOY == 'true' && env.CAPROVER_KLAAR == 'true'
+        uses: caprover/deploy-from-github@v1.1.2
+        with:
+          server: '${{ secrets.CAPROVER_SERVER }}'
+          app: '${{ secrets.APP_NAME }}'
+          token: '${{ secrets.APP_TOKEN }}'
+
+      - name: Skip deploy (CapRover secrets not set)
+        if: env.DEPLOY == 'true' && env.CAPROVER_KLAAR != 'true'
+        run: echo "::notice::CAPROVER_SERVER, APP_NAME of APP_TOKEN ontbreekt; build, tests en rooktest zijn klaar, de deploy is overgeslagen."

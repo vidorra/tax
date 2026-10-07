@@ -27,15 +27,17 @@ IB-aangiftetool voor zzp-huishoudens. Het plan (versie 2) staat buiten deze repo
 - `getDb()` (Drizzle) en `getSqlite()` (ruw) openen lui. Schrijven dat uit meer dan één statement bestaat of eerst leest, gaat via `schrijf((tx) => ...)` (BEGIN IMMEDIATE). Die functie is synchroon: `.all()`, `.get()`, `.run()`, geen `await`. Async werk (hashen, fetch) ervoor of erna. Geen advisory locks of `FOR UPDATE`.
 - Tijdstippen zijn `Date` in de code en ISO-tekst (UTC) in de database (kolomtype `tijdstip`), booleans 0/1, JSON als tekst. In ruwe SQL geef je een `Date` als `.toISOString()` mee.
 - Schemawijziging: een nieuw bestand in `migrations/` (nooit een bestaand wijzigen) en `lib/db/schema.ts` gelijk houden; `lib/db/__tests__/schema.spec.ts` vergelijkt ze. Een tabel opnieuw opbouwen kan met de markering `-- migratie: zonder-foreign-keys` (zie `lib/db/migreer.ts`).
-- Tests met een database gebruiken `gebruikTijdelijkeDb()` uit `lib/db/testdb.ts`: een eigen, gemigreerd bestand per test. Ze draaien altijd.
+- Tests met een database gebruiken `gebruikTijdelijkeDb()` uit `lib/db/testdb.ts`: een eigen, gemigreerd bestand per test. Ze draaien altijd. `vitest.setup.ts` zet `DATABASE_PATH` per testbestand op een tijdelijk pad en laat het bestand falen als een test daar toch een database opent, zodat de suite nooit `./data/ibcalculator.db` raakt.
 - Fouten van de database vertaal je met `dbFoutSoort(e)`; nooit inhoud van rijen in een melding of log.
 
 ## Deploy (`Dockerfile`, `start.sh`)
 
-- Image op node:20-alpine. De builder heeft de bouwtools voor better-sqlite3 en geeft na `npm prune --omit=dev` zijn `node_modules` aan de runner, die dus niets bouwt. Native modules staan in `serverExternalPackages` (`next.config.js`).
-- `tsx` staat in `dependencies`: `start.sh` (migraties) en `scripts/backup.ts` draaien ermee in de container.
+- Bouwen en testen gebeurt in GitHub Actions (`.github/workflows/deploy.yml`), niet op de server: `next build`, dan `scripts/deploy-tarball.sh` (deploy.tar met de kant-en-klare `.next`), dan de image uit die tarball bouwen (linux/amd64) en `scripts/docker-rooktest.sh` met `ROOKTEST_BOUW=0`. Alleen als dat slaagt, bij een push naar main, deployt `caprover/deploy-from-github`. Geen Docker op de Mac nodig.
+- GitHub heeft alleen de secrets `CAPROVER_SERVER`, `APP_NAME` en `APP_TOKEN`. Alle omgevingsvariabelen van de app staan in CapRover. `NEXT_PUBLIC_SITE_URL` gaat bij `next build` de pagina's in en staat daarom vast als `SITE_URL` in `deploy.yml`.
+- De `Dockerfile` bouwt de app niet: een deps-stage op node:20-alpine met de bouwtools voor better-sqlite3 draait `npm ci --omit=dev`, de runner krijgt die `node_modules` plus de bestanden uit de tarball en stopt zonder `.next/BUILD_ID`. Native modules staan in `serverExternalPackages` (`next.config.js`).
+- `tsx` staat in `dependencies`: `start.sh` (migraties) en `scripts/backup.ts` draaien ermee in de container. Wat die scripts importeren, bepaalt `deploy-tarball.sh` met esbuild; een import uit een pakket in `devDependencies` laat het script falen.
 - `start.sh` start als root, geeft de map van `DATABASE_PATH` (`/app/data`) aan `node`, en draait daarna alles als `node`: eerst `scripts/migrate.ts`, dan de server (ook als migreren mislukt). Scripts in de container met `docker exec -u node`.
-- Geen gegevens in de image: `.dockerignore` sluit `data/`, `*.db*`, back-ups, `.env*` en `prive/` uit.
+- Geen gegevens in de image: de tarball bevat alleen een vaste lijst (`deploy-tarball.sh` weigert tests, `prive/`, databases, back-ups en `.env*` behalve de gegenereerde `.env.production` met `GIT_SHA`), en `.dockerignore` sluit hetzelfde uit bij een build vanuit de werkmap.
 
 ## UI
 

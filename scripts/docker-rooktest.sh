@@ -1,23 +1,35 @@
 #!/usr/bin/env bash
-# Rooktest van de Docker-image zoals CapRover hem draait: bouwen, starten met een lege opslag als /app/data (de
-# Persistent Directory) en dan controleren:
-# - /api/health antwoordt en /dossier/setup/ toont het formulier (geen configuratie- of databasemelding);
+# Rooktest van de Docker-image zoals CapRover hem bouwt en draait. De workflow in GitHub Actions
+# (.github/workflows/deploy.yml) draait hem voor elke deploy op een Linux-runner: die maakt deploy.tar met
+# scripts/deploy-tarball.sh, pakt hem uit, bouwt daaruit de image (linux/amd64, zoals de server) en roept dit script
+# aan met ROOKTEST_BOUW=0 en ROOKTEST_IMAGE. Wie lokaal Docker heeft, kan het script ook alles zelf laten doen
+# (npm run build, de tarball, de image); nodig is dat niet.
+#
+# Met de image start de test een container met een lege opslag als /app/data (de Persistent Directory) en controleert:
+# - de image bevat .next zonder .next/cache, tsx en geen devDependencies, tests, prive-mappen, databases of
+#   .env-bestanden (alleen de gegenereerde .env.production);
+# - /api/health antwoordt met de versie uit de tarball (GIT_SHA in .env.production, of ROOKTEST_VERSIE) en
+#   /dossier/setup/ toont het formulier (geen configuratie- of databasemelding);
 # - het databasebestand staat in de gekoppelde opslag en is van node (ook als die eerst van root was), en de server
 #   draait als node;
 # - tsx werkt in de image (migreren als node);
-# - een account met 2FA aanmaken lukt, en in een nieuwe container met dezelfde map (een deploy) bestaat het nog.
+# - een account met 2FA aanmaken lukt, scripts/backup.ts maakt en controleert een back-up in de container, en in een
+#   nieuwe container met dezelfde map (een deploy) bestaat het account nog.
 #
-#   scripts/docker-rooktest.sh                                   # bouwt de image uit deze werkmap
-#   ROOKTEST_PLATFORM=linux/amd64 scripts/docker-rooktest.sh     # als op de server (x86), op een Mac via emulatie
-#   ROOKTEST_BOUW=0 ROOKTEST_IMAGE=<image> scripts/docker-rooktest.sh   # een bestaande image
+#   ROOKTEST_BOUW=0 ROOKTEST_IMAGE=<image> scripts/docker-rooktest.sh   # een bestaande image (zo draait de workflow)
+#   ROOKTEST_VERSIE=abc1234                                      # deze versie verwachten in /api/health
+#   ROOKTEST_PLATFORM=linux/amd64                                # platform van de image (docker build en docker run)
 #   ROOKTEST_POORT=3999                                          # poort op 127.0.0.1 (standaard 3999)
 #   ROOKTEST_OPSLAG=map                                          # een tijdelijke map op de host in plaats van een volume
+#   scripts/docker-rooktest.sh                                   # lokaal: next build, tarball, image uit de tarball
+#   ROOKTEST_NEXT_BUILD=0 scripts/docker-rooktest.sh             # lokaal, met de bestaande .next (geen npm run build)
 #
 # Standaard is /app/data een nieuw Docker-volume dat eerst van root wordt gemaakt, zoals een volume van CapRover of
 # een map op de server. Met ROOKTEST_OPSLAG=map is het een tijdelijke map op de host; Docker Desktop op een Mac toont
 # daarin geen echte eigenaar, dus daar slaat de test de eigenaarscontrole over.
 #
-# Gebruikt een verzonnen account en wegwerpsleutels; ruimt container en mappen op.
+# Nodig op de host: docker, curl, openssl en node. Gebruikt een verzonnen account en wegwerpsleutels; ruimt
+# container, volume en mappen op. De image blijft staan (docker image rm <image>).
 set -euo pipefail
 
 hoofd="$(cd "$(dirname "$0")/.." && pwd)"
@@ -72,8 +84,38 @@ start_container() {
 }
 
 if [ "${ROOKTEST_BOUW:-1}" = "1" ]; then
-  docker build ${platform:+--platform "$platform"} -t "$image" "$hoofd"
+  if [ "${ROOKTEST_NEXT_BUILD:-1}" = "1" ]; then
+    echo "npm run build (zoals de workflow)"
+    (cd "$hoofd" && npm run build)
+  fi
+  "$hoofd/scripts/deploy-tarball.sh" "$werk/deploy.tar"
+  mkdir "$werk/context"
+  tar -xf "$werk/deploy.tar" -C "$werk/context"
+  echo "Image bouwen uit de uitgepakte tarball${platform:+ ($platform)}"
+  docker build ${platform:+--platform "$platform"} -t "$image" "$werk/context"
 fi
+docker image inspect "$image" >/dev/null 2>&1 || mislukt "image $image bestaat niet"
+
+# De versie die /api/health moet tonen: ROOKTEST_VERSIE, anders GIT_SHA uit de .env.production in de image.
+verwacht_sha="${ROOKTEST_VERSIE:-$(docker run --rm ${platform:+--platform "$platform"} --entrypoint sh "$image" -c 'sed -n "s/^GIT_SHA=//p" /app/.env.production 2>/dev/null' || true)}"
+
+# De inhoud van de image, zonder de app te starten.
+docker run --rm ${platform:+--platform "$platform"} --entrypoint sh "$image" -c '
+  cd /app || exit 1
+  fout=0
+  meld() { echo "$1" >&2; fout=1; }
+  [ -f .next/BUILD_ID ] || meld "geen .next/BUILD_ID"
+  [ ! -e .next/cache ] || meld ".next/cache staat in de image"
+  [ -x node_modules/.bin/tsx ] || meld "geen tsx in node_modules"
+  for p in typescript vitest eslint drizzle-kit tailwindcss; do
+    [ ! -e "node_modules/$p" ] || meld "devDependency $p staat in de image"
+  done
+  rest="$(find . -path ./node_modules -prune -o \( -name __tests__ -o -name prive -o -name "*.spec.ts" -o -name "*.db" -o -name "*.ibcbak" -o \( -name ".env*" ! -name .env.production \) \) -print)"
+  [ -z "$rest" ] || meld "hoort niet in de image: $rest"
+  [ ! -e .env.production ] || ! grep -Evq "^GIT_SHA=" .env.production || meld ".env.production bevat meer dan GIT_SHA"
+  exit $fout
+' || mislukt "de inhoud van de image klopt niet"
+ok "inhoud van de image (.next zonder cache, tsx, geen devDependencies, tests of geheimen)"
 
 if [ "$opslag" != "map" ]; then
   # Een leeg volume neemt bij de eerste start de map uit de image over (van node). Maak hem van root en niet leeg,
@@ -85,7 +127,12 @@ fi
 echo "Container starten met lege opslag als /app/data ($opslag: $data)"
 start_container
 grep -q '"ok":true' "$werk/health.json" || mislukt "/api/health geeft geen ok"
-ok "/api/health"
+if [ -n "$verwacht_sha" ]; then
+  grep -q "\"versie\":\"$verwacht_sha\"" "$werk/health.json" || mislukt "/api/health toont niet versie $verwacht_sha: $(cat "$werk/health.json")"
+  ok "/api/health (versie $verwacht_sha)"
+else
+  ok "/api/health"
+fi
 
 curl -fsSL "$basis/dossier/setup/" -o "$werk/setup.html" || mislukt "/dossier/setup/ geeft een fout"
 grep -q 'nog niet ingericht' "$werk/setup.html" && mislukt "/dossier/setup/ toont de configuratiemelding"
@@ -121,6 +168,13 @@ code="$(docker exec "$naam" node -e "const O=require('otpauth');console.log(new 
 curl -sS -H 'Content-Type: application/json' -H "Cookie: $cookie" -d "{\"code\":\"$code\"}" "$basis/api/auth/setup/bevestig/" -o "$werk/bevestig.json"
 grep -q '"ok":true' "$werk/bevestig.json" || { cat "$werk/bevestig.json" >&2; mislukt "2FA bevestigen"; }
 ok "account met 2FA aangemaakt"
+
+docker exec -u node "$naam" npx --no-install tsx scripts/backup.ts maak --uit /tmp/rooktest-backup > "$werk/backup.txt" 2>&1 || { cat "$werk/backup.txt" >&2; mislukt "back-up maken met scripts/backup.ts als node"; }
+bestand="$(docker exec "$naam" sh -c 'ls /tmp/rooktest-backup/*.ibcbak' | head -1)"
+[ -n "$bestand" ] || mislukt "scripts/backup.ts maak schreef geen .ibcbak"
+docker exec -u node "$naam" npx --no-install tsx scripts/backup.ts bekijk "$bestand" > "$werk/bekijk.txt" 2>&1 || { cat "$werk/bekijk.txt" >&2; mislukt "back-up bekijken met scripts/backup.ts"; }
+grep -q 'Rijen per tabel' "$werk/bekijk.txt" || { cat "$werk/bekijk.txt" >&2; mislukt "bekijk toont geen rijen per tabel"; }
+ok "scripts/backup.ts in de image: back-up gemaakt en gecontroleerd"
 
 echo "Nieuwe container met dezelfde datamap (zoals een deploy)"
 docker rm -f "$naam" >/dev/null

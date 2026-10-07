@@ -8,8 +8,9 @@
  *   DATABASE_PATH (alleen in tests), dan sluit de oude verbinding en opent de nieuwe.
  * - Bij openen: busy_timeout (wachten op een ander proces in plaats van meteen falen), journal_mode WAL (lezers
  *   wachten niet op een schrijver), synchronous NORMAL, foreign_keys aan (zonder dat doet SQLite niets met
- *   REFERENCES en ON DELETE CASCADE) en secure_delete aan (verwijderde rijen worden overschreven, zodat 'Alles
- *   verwijderen' ook de versleutelde inhoud uit het bestand haalt).
+ *   REFERENCES en ON DELETE CASCADE) en secure_delete aan (verwijderde rijen worden in het databasebestand
+ *   overschreven). De oude pagina's staan daarna nog in -wal, ook na een gewone checkpoint, zolang de verbinding
+ *   open is; daarom doet 'Alles verwijderen' meteen leegWal() (wal_checkpoint(TRUNCATE)).
  * - better-sqlite3 is synchroon. `await db.select()...` werkt gewoon (de query draait direct), maar binnen
  *   schrijf() en lees() gebruik je de synchrone vormen: .all(), .get(), .run() en .values().
  *
@@ -175,6 +176,44 @@ export function lees<T>(fn: (tx: Tx) => T & NietAsync<T>): T {
     return c.db.transaction((tx) => synchroon(fn(tx), 'lees'), { behavior: 'deferred' })
   } finally {
     c.leesDiepte--
+  }
+}
+
+/**
+ * Eén poging om de WAL leeg te maken: alles uit -wal gaat naar het databasebestand en -wal wordt 0 bytes (PRAGMA
+ * wal_checkpoint(TRUNCATE)). Wacht niet: busy_timeout staat tijdens de poging op 0, zodat de thread niet blijft hangen
+ * op een ander proces. Geeft false als een ander proces nog uit de WAL leest of erin schrijft (SQLite meldt dan busy
+ * in de uitkomst of gooit SQLITE_BUSY); andere fouten gooit hij door.
+ */
+export function probeerLeegWal(): boolean {
+  const sqlite = getSqlite()
+  const wachttijd = Number(sqlite.pragma('busy_timeout', { simple: true })) || 0
+  sqlite.pragma('busy_timeout = 0')
+  try {
+    const [uitkomst] = sqlite.pragma('wal_checkpoint(TRUNCATE)') as Array<{ busy: number }>
+    return uitkomst?.busy === 0
+  } catch (e) {
+    if (dbFoutSoort(e) === 'bezet') return false
+    throw e
+  } finally {
+    sqlite.pragma(`busy_timeout = ${wachttijd}`)
+  }
+}
+
+/**
+ * Maakt de WAL leeg (zie probeerLeegWal) en probeert het opnieuw zolang een ander proces (de back-up-CLI, een tweede
+ * container tijdens een deploy) de WAL nog gebruikt: na `pauzeMs`, daarna steeds twee keer zo lang, tot `pogingen` op
+ * zijn. Met de standaardwaarden duurt dat hooguit ruim 3 seconden, zonder de thread te blokkeren. Geeft true als -wal
+ * leeg is, false als het niet lukte; dan staan de oude pagina's nog in -wal tot een volgende geslaagde poging.
+ */
+export async function leegWal(opties: { pogingen?: number; pauzeMs?: number } = {}): Promise<boolean> {
+  const pogingen = Math.max(1, Math.floor(opties.pogingen ?? 6))
+  let pauze = Math.max(0, opties.pauzeMs ?? 100)
+  for (let poging = 1; ; poging++) {
+    if (probeerLeegWal()) return true
+    if (poging >= pogingen) return false
+    await new Promise((klaar) => setTimeout(klaar, pauze))
+    pauze = Math.min(pauze * 2, 2_000)
   }
 }
 

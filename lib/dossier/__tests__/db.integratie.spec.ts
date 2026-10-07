@@ -7,13 +7,13 @@
  * wijzigingen van de aangiftestaat. Een tweede verbinding speelt een ander proces (migreren, back-up, herstel).
  */
 import { randomBytes } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
 import { and, eq, inArray } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { activeerTotp, eersteGebruiker, gebruikerOpId, maakGebruiker, setupAfgerond, verhoogSessieGeneratie } from '@/lib/auth/gebruiker'
 import { serverFout } from '@/lib/auth/api'
 import { versleutel } from '@/lib/crypto'
-import { getDb, getSqlite, openSqlite, sluitDb } from '@/lib/db'
+import { getDb, getSqlite, openSqlite, probeerLeegWal, sluitDb } from '@/lib/db'
 import * as schema from '@/lib/db/schema'
 import { gebruikTijdelijkeDb } from '@/lib/db/testdb'
 import * as opslag from '@/lib/dossier/opslag'
@@ -234,6 +234,63 @@ describe('dossier', () => {
     await opslag.verwijderAlles(userId, true)
     getSqlite().pragma('wal_checkpoint(TRUNCATE)')
     expect(readFileSync(testDb.pad).includes(merk)).toBe(false)
+  })
+
+  it('na verwijder-alles staat de inhoud ook niet meer in -wal, terwijl de verbinding open blijft', async () => {
+    const { userId, hh } = await metHuishouden('wal@example.nl')
+    await opslag.maakJaar(hh, voorbeeldInvoer(2024))
+    const merk = getDb().select({ invoerEnc: schema.dossierYears.invoerEnc }).from(schema.dossierYears).get()!.invoerEnc.slice(10, 80)
+    const wal = `${testDb.pad}-wal`
+    // Zonder checkpoint staat het nieuwe jaar alleen nog in -wal.
+    expect(readFileSync(wal).includes(merk)).toBe(true)
+    await opslag.verwijderAlles(userId, true)
+    expect(getSqlite().open).toBe(true)
+    expect(statSync(wal).size).toBe(0)
+    expect(readFileSync(testDb.pad).includes(merk)).toBe(false)
+  })
+
+  it('verwijder-alles probeert -wal opnieuw te legen zolang een ander proces nog leest', async () => {
+    const { userId, hh } = await metHuishouden('lezer@example.nl')
+    await opslag.maakJaar(hh, voorbeeldInvoer(2024))
+    const merk = getDb().select({ invoerEnc: schema.dossierYears.invoerEnc }).from(schema.dossierYears).get()!.invoerEnc.slice(10, 80)
+    // Een tweede verbinding (de back-up-CLI, een tweede container) houdt een leestransactie open op de WAL.
+    const ander = openSqlite(testDb.pad)
+    try {
+      ander.prepare('BEGIN').run()
+      ander.prepare('SELECT count(*) AS n FROM dossier_years').get()
+      expect(probeerLeegWal()).toBe(false)
+      setTimeout(() => ander.prepare('COMMIT').run(), 250)
+      await opslag.verwijderAlles(userId, true)
+      expect(ander.inTransaction).toBe(false)
+      expect(statSync(`${testDb.pad}-wal`).size).toBe(0)
+      expect(readFileSync(testDb.pad).includes(merk)).toBe(false)
+    } finally {
+      ander.close()
+    }
+  })
+
+  it('blijft een ander proces lezen, dan is het dossier toch weg en logt verwijder-alles alleen een waarschuwing', async () => {
+    const { userId, hh } = await metHuishouden('blijft@example.nl')
+    await opslag.maakJaar(hh, voorbeeldInvoer(2024))
+    const ander = openSqlite(testDb.pad)
+    const waarschuwingen: string[] = []
+    const spion = vi.spyOn(console, 'warn').mockImplementation((...a: unknown[]) => void waarschuwingen.push(a.join(' ')))
+    vi.useFakeTimers()
+    try {
+      ander.prepare('BEGIN').run()
+      ander.prepare('SELECT count(*) AS n FROM dossier_years').get()
+      const klaar = opslag.verwijderAlles(userId, true)
+      await vi.runAllTimersAsync()
+      await expect(klaar).resolves.toBeUndefined()
+      expect(tel('households')).toBe(0)
+      expect(tel('users')).toBe(0)
+      expect(waarschuwingen).toEqual(['Database: -wal na Alles verwijderen nog niet leeg, een ander proces gebruikt de WAL'])
+      expect(getSqlite().pragma('busy_timeout', { simple: true })).toBe(5000)
+    } finally {
+      vi.useRealTimers()
+      spion.mockRestore()
+      ander.close()
+    }
   })
 
   it('een versleutelde invoer werkt niet in de rij van een ander huishouden (AAD)', async () => {

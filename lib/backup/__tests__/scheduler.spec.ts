@@ -1,9 +1,14 @@
 /**
  * Scheduler en instrumentation.ts: idempotent starten, één logregel, eerste tik na een minuut en daarna elk
  * uur, geen overlappende tikken, alleen de uitkomststatus in de log, en geen start tijdens next build of
- * in de edge-runtime. De service is nagebootst.
+ * in de edge-runtime. De service en markeerAfgebroken uit runs zijn nagebootst, dus deze tests openen geen
+ * database (ook niet de standaarddatabase ./data/ibcalculator.db).
  */
+import { existsSync } from 'node:fs'
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { dbPad } from '@/lib/db/pad'
 
 import type { BackupConfig, BackupResultaat } from '../types'
 
@@ -11,6 +16,8 @@ const nep = vi.hoisted(() => ({
   config: { klaar: true, ontbreekt: [], ontvanger: 'backup.ontvanger@example.nl' } as BackupConfig,
   tik: async (): Promise<BackupResultaat> => ({ status: 'overgeslagen' }),
   tikken: 0,
+  afgebroken: async (): Promise<number> => 0,
+  volgorde: [] as string[],
 }))
 
 vi.mock('../service', async (orig) => ({
@@ -18,7 +25,16 @@ vi.mock('../service', async (orig) => ({
   backupConfig: () => nep.config,
   geplandeTik: async () => {
     nep.tikken++
+    nep.volgorde.push('tik')
     return nep.tik()
+  },
+}))
+
+vi.mock('../runs', async (orig) => ({
+  ...(await orig<typeof import('../runs')>()),
+  markeerAfgebroken: async () => {
+    nep.volgorde.push('afgebroken')
+    return nep.afgebroken()
   },
 }))
 
@@ -32,6 +48,8 @@ beforeEach(() => {
   nep.config = { klaar: true, ontbreekt: [], ontvanger: 'backup.ontvanger@example.nl' }
   nep.tik = async () => ({ status: 'overgeslagen' })
   nep.tikken = 0
+  nep.afgebroken = async () => 0
+  nep.volgorde = []
 })
 afterEach(() => {
   stopBackupScheduler()
@@ -76,6 +94,21 @@ describe('startBackupScheduler', () => {
     }
     await vi.advanceTimersByTimeAsync(TIK_MS)
     expect(log.regels.slice(1)).toEqual(['Back-up: verstuurd', 'Back-up: tik mislukt (Error, SQLITE_IOERR)'])
+  })
+
+  it('elke tik markeert eerst vastgelopen runs, en gaat door als dat mislukt; er gaat geen database open', async () => {
+    const g = globalThis as unknown as { __ibDb?: unknown }
+    expect(g.__ibDb).toBeUndefined()
+    startBackupScheduler()
+    await vi.advanceTimersByTimeAsync(EERSTE_TIK_MS)
+    nep.afgebroken = async () => {
+      throw Object.assign(new Error('no such table: backups'), { code: 'SQLITE_ERROR' })
+    }
+    await vi.advanceTimersByTimeAsync(TIK_MS)
+    expect(nep.volgorde).toEqual(['afgebroken', 'tik', 'afgebroken', 'tik'])
+    expect(log.regels).toHaveLength(1)
+    expect(g.__ibDb).toBeUndefined()
+    expect(existsSync(dbPad())).toBe(false)
   })
 
   it('start geen tweede tik zolang de vorige nog loopt', async () => {

@@ -42,3 +42,6 @@ WhatsApp*
 !public/**/*.png
 !public/**/*.jpg
 !public/**/*.jpeg
+
+# Tarball voor CapRover (scripts/deploy-tarball.sh)
+deploy.tar

@@ -51,12 +51,12 @@ De database is één SQLite-bestand, zonder aparte databaseserver: lokaal `./dat
 
 | Variabele | Nodig voor | Toelichting |
 |---|---|---|
-| `NEXT_PUBLIC_SITE_URL` | alles | Publieke URL; ook als build-arg (canonical, sitemap) |
+| `NEXT_PUBLIC_SITE_URL` | alles | Publieke URL (canonical, sitemap, robots). `next build` zet hem vast in de pagina's; voor de server staat hij daarom in `.github/workflows/deploy.yml` (zie Deploy), niet in CapRover. Lokaal in `.env.local` |
 | `AUTH_SECRET` | dossier | Minimaal 32 tekens, willekeurig |
 | `DOSSIER_KEY` | dossier | 32 bytes als base64 (`node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`) |
 | `TRUSTED_PROXY_HOPS` | rate limits | Standaard 1 (één reverse proxy, zoals de nginx van CapRover); 2 met Cloudflare ervoor |
-| `NEXT_PUBLIC_UMAMI_WEBSITE_ID`, `NEXT_PUBLIC_UMAMI_SRC` | statistiek | Optioneel, cookieless. Beide als build-arg; `NEXT_PUBLIC_UMAMI_SRC` is de URL van het script op je eigen Umami-server (bijvoorbeeld `https://stats.example.nl/script.js`), de CSP staat die host toe. Ontbreekt een van de twee, dan geen statistiek |
-| `GIT_SHA` | `/api/health` | Optioneel |
+| `NEXT_PUBLIC_UMAMI_WEBSITE_ID`, `NEXT_PUBLIC_UMAMI_SRC` | statistiek | Optioneel, cookieless. Ook vast bij het bouwen: voor de server als repositoryvariabelen in GitHub (de workflow geeft ze aan `next build`), niet in CapRover. `NEXT_PUBLIC_UMAMI_SRC` is de URL van het script op je eigen Umami-server (bijvoorbeeld `https://stats.example.nl/script.js`), de CSP staat die host toe. Ontbreekt een van de twee, dan geen statistiek |
+| `GIT_SHA` | `/api/health` | Optioneel. Bij een deploy zet de workflow hem in `.env.production` in de tarball |
 | `MONEYBIRD_TOKEN`, `MONEYBIRD_ADMINISTRATION_ID` | Moneybird-koppeling | Optioneel; een koppeling uit de omgeving (id `env`) naast de koppelingen die je in het dossier toevoegt |
 | `BACKUP_MAIL_TO` | back-up | Eén mailadres dat op 1 februari en 1 augustus de versleutelde back-up krijgt |
 | `MAIL_FROM`, `MAIL_REPLY_TO` | back-up | Afzender op een geverifieerd domein, bijvoorbeeld `noreply@example.nl`; antwoordadres optioneel |
@@ -178,27 +178,31 @@ Verder:
 
 ## Deploy (CapRover)
 
-De database zit in de app zelf: een SQLite-bestand in een Persistent Directory. Er is geen aparte database-app en geen `DATABASE_URL`.
+Een push naar `main` test de app, controleert de image en deployt hem. Alles gebeurt in GitHub Actions (`.github/workflows/deploy.yml`), want de server heeft te weinig geheugen voor `npm ci` met devDependencies en `next build`:
 
-1. Maak in CapRover een app voor ibcalculator en zet bij het aanmaken **Has Persistent Data** aan. Dat kan later niet meer; vergeet je het, maak de app dan opnieuw aan.
+1. `npm ci`, `npm run typecheck`, `npm test`, de migraties op een leeg SQLite-bestand en `scripts/tax-diff.ts --check`.
+2. `next build` met de vaste site-URL (zie hieronder).
+3. `scripts/deploy-tarball.sh` maakt `deploy.tar`: de kant-en-klare `.next` (zonder bouwcache), `package.json` en `package-lock.json`, `start.sh`, `migrations/`, `scripts/migrate.ts` en `scripts/backup.ts` met de bronbestanden die ze laden, de `Dockerfile` en `captain-definition`, en een `.env.production` met alleen `GIT_SHA`. Geen tests, `prive/`-mappen, databases, back-ups of `.env`-bestanden; het script stopt als er toch zoiets in komt.
+4. De job pakt `deploy.tar` uit en bouwt daaruit de image voor `linux/amd64`, zoals CapRover op de server doet. `scripts/docker-rooktest.sh` test die image: de inhoud (geen devDependencies, tests of geheimen), `/api/health` met de juiste versie, `/dossier/setup/`, het databasebestand in `/app/data` van `node`, migreren met tsx, een account met 2FA, een back-up met `scripts/backup.ts`, en of het account er na een nieuwe container met dezelfde opslag nog is.
+5. Alleen als dat allemaal slaagt, stuurt `caprover/deploy-from-github` de tarball naar CapRover. De `Dockerfile` bouwt de app niet opnieuw: hij installeert alleen de productie-afhankelijkheden (`npm ci --omit=dev`, met de bouwtools voor better-sqlite3 in een aparte stage) en zet de bestanden uit de tarball erbij. Zonder `.next/BUILD_ID` stopt de build met een melding.
+
+Bij een pull request naar `main` draaien stap 1 tot en met 4 wel, de deploy niet. Docker op je eigen computer is niet nodig.
+
+**De site-URL** staat op één plek: `SITE_URL` bovenin `.github/workflows/deploy.yml`, nu `https://ibcalculator.server.devjens.nl`. `next build` zet hem vast in de pagina's (canonical, sitemap, robots, JSON-LD), dus in CapRover heeft hij geen effect. Wijzigen: pas de URL daar aan en push naar `main`. Een repositoryvariabele `NEXT_PUBLIC_SITE_URL` gaat voor als je die ooit zet, maar nodig is hij niet.
+
+**GitHub** heeft alleen drie secrets (Settings, Secrets and variables, Actions): `CAPROVER_SERVER` (bijvoorbeeld `https://captain.example.nl`), `APP_NAME` (de naam van de app in CapRover) en `APP_TOKEN` (in CapRover bij de app onder Deployment: Enable App Token). Zonder die secrets draaien test, build en rooktest wel en slaat de workflow de deploy over, met een melding.
+
+**CapRover** heeft de database en alle omgevingsvariabelen. De database is een SQLite-bestand in een Persistent Directory; er is geen aparte database-app en geen `DATABASE_URL`.
+
+1. Maak een app voor ibcalculator en zet bij het aanmaken **Has Persistent Data** aan. Dat kan later niet meer; vergeet je het, maak de app dan opnieuw aan.
 2. Voeg bij App Configs onder **Persistent Directories** een map toe: *Path in App* `/app/data`, *Label* bijvoorbeeld `ibcalculator-data`. CapRover maakt daar een Docker-volume van dat deploys en herstarts overleeft. Zonder deze map staat de database in de container en is hij bij de volgende deploy weg.
 3. Zet **Container HTTP Port** op 3000, **HTTPS** aan met doorsturen van HTTP naar HTTPS, en **Instance Count** op 1. Er schrijft één proces tegelijk in het databasebestand, en de back-upplanner en de rate limits draaien in het geheugen van één container.
-4. Zet de omgevingsvariabelen hierboven (de `NEXT_PUBLIC_*`-variabelen ook als build-arg), voor de back-up ook `BACKUP_MAIL_TO` en de mailvariabelen. `DATABASE_PATH` laat je weg; de image zet `/app/data/ibcalculator.db`.
-5. Zet in GitHub de secrets `CAPROVER_SERVER`, `APP_NAME` en `APP_TOKEN`; zonder die secrets slaat de workflow de deploy over en draait alleen test en build.
-6. `start.sh` geeft bij elke start de map `/app/data` aan de gebruiker `node` (een volume of een map op de host is vaak van root), voert als `node` de migraties uit op het databasebestand (idempotent, per migratie een transactie; bij de eerste start maakt dat het bestand aan) en start dan de server, ook als het migreren mislukt, zodat de publieke rekentool blijft werken.
-7. Open `/dossier/setup` direct na de eerste deploy: de eerste die daar een account aanmaakt, claimt de instantie.
-8. Controleer `/api/health` (laatste definitieve jaar, varianten, versie).
+4. Zet onder **Environmental Variables** alles wat de app bij het draaien leest: `AUTH_SECRET`, `DOSSIER_KEY`, eventueel `TRUSTED_PROXY_HOPS`, voor de back-up `BACKUP_MAIL_TO`, `MAIL_FROM` en `RESEND_API_KEY` (of de `SMTP_*`-variabelen), en eventueel `MONEYBIRD_TOKEN` en `MONEYBIRD_ADMINISTRATION_ID`. `DATABASE_PATH`, `PORT` en `GIT_SHA` laat je weg: de image zet `/app/data/ibcalculator.db` en poort 3000, en de versie komt uit de tarball. De `NEXT_PUBLIC_*`-variabelen horen hier niet; die zijn al bij het bouwen vastgezet.
+5. Bij elke start geeft `start.sh` de map `/app/data` aan de gebruiker `node` (een volume of een map op de host is vaak van root), voert als `node` de migraties uit (idempotent, per migratie een transactie; bij de eerste start maakt dat het bestand aan) en start dan de server, ook als het migreren mislukt, zodat de publieke rekentool blijft werken.
+6. Open `/dossier/setup` direct na de eerste deploy: de eerste die daar een account aanmaakt, claimt de instantie.
+7. Controleer `/api/health`: laatste definitieve jaar, varianten en `versie`, de eerste zeven tekens van de commit die live staat.
 
-Lokaal de image proberen, met een eigen volume voor de database:
-
-```bash
-docker build -t ibcalculator .
-docker run --rm -p 3000:3000 -v ibcalculator-data:/app/data --env-file .env.local ibcalculator
-```
-
-`.env.local` levert `AUTH_SECRET` en `DOSSIER_KEY`. Zet daar geen `DATABASE_PATH` of `PORT` in, dan gebruikt de container `/app/data` en poort 3000. Het volume blijft bestaan tussen twee keer starten; gebruik daarom steeds dezelfde `DOSSIER_KEY`, anders zijn de dossiers erin niet meer te openen.
-
-`scripts/docker-rooktest.sh` doet dit automatisch, met wegwerpsleutels en een nieuw volume van root als `/app/data` (met `ROOKTEST_OPSLAG=map` een tijdelijke map op de host): bouwen, `/api/health` en `/dossier/setup/`, het databasebestand in de map en van `node`, migreren met tsx in de image, een account met 2FA aanmaken, en in een nieuwe container met dezelfde map (zoals bij een deploy) kijken of het account er nog is. Met `ROOKTEST_PLATFORM=linux/amd64` bouw je voor x86, zoals de server.
+Wie lokaal Docker heeft, kan de rooktest ook zelf draaien: `scripts/docker-rooktest.sh` bouwt dan de app, maakt de tarball en bouwt de image eruit, met wegwerpsleutels en een nieuw volume van root als `/app/data` (`ROOKTEST_PLATFORM=linux/amd64` voor x86 zoals de server, `ROOKTEST_OPSLAG=map` voor een tijdelijke map op de host). Met `ROOKTEST_BOUW=0 ROOKTEST_IMAGE=<image>` test hij een bestaande image, zoals de workflow doet.
 
 ## Onderhoud van de jaarparameters
 

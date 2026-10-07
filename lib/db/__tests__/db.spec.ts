@@ -2,14 +2,14 @@
  * De databaselaag op een echt SQLite-bestand: lui openen, instellingen, schrijf() en lees(), tijdstippen,
  * booleans, JSON, foreign keys, STRICT-tabellen en het herkennen van fouten. Elke test een eigen bestand.
  */
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
 import { eq, lt } from 'drizzle-orm'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { databasemapSchrijfbaar, dbFoutSoort, dbGeconfigureerd, dbPad, getDb, getSqlite, lees, openSqlite, schrijf, sluitDb } from '@/lib/db'
+import { databasemapSchrijfbaar, dbFoutSoort, dbGeconfigureerd, dbPad, getDb, getSqlite, leegWal, lees, openSqlite, probeerLeegWal, schrijf, sluitDb } from '@/lib/db'
 import { backups, households, leesTijdstip, users } from '@/lib/db/schema'
 import { gebruikTijdelijkeDb, openTijdelijkeDb } from '@/lib/db/testdb'
 
@@ -249,6 +249,38 @@ describe('verwijderen', () => {
     getDb().delete(households).run()
     getSqlite().pragma('wal_checkpoint(TRUNCATE)')
     expect(readFileSync(db.pad).includes(merk)).toBe(false)
+  })
+
+  it('een gewone checkpoint laat verwijderde rijen in -wal staan; leegWal() haalt ze eruit', async () => {
+    const merk = 'WAL-MERK-'.repeat(8)
+    const u = maakGebruiker()
+    getDb().insert(households).values({ userId: u.id, gegevensEnc: merk }).run()
+    getDb().delete(households).run()
+    getSqlite().pragma('wal_checkpoint(PASSIVE)')
+    expect(readFileSync(`${db.pad}-wal`).includes(merk)).toBe(true)
+    expect(await leegWal()).toBe(true)
+    expect(statSync(`${db.pad}-wal`).size).toBe(0)
+    expect(readFileSync(db.pad).includes(merk)).toBe(false)
+  })
+
+  it('leegWal() wacht niet op een ander proces dat leest, maar probeert het opnieuw tot het lukt', async () => {
+    maakGebruiker()
+    const ander = openSqlite(db.pad)
+    try {
+      ander.prepare('BEGIN').run()
+      ander.prepare('SELECT count(*) AS n FROM users').get()
+      const start = Date.now()
+      expect(probeerLeegWal()).toBe(false)
+      // busy_timeout is 5 seconden, maar de poging wacht niet en zet hem daarna terug.
+      expect(Date.now() - start).toBeLessThan(1_000)
+      expect(getSqlite().pragma('busy_timeout', { simple: true })).toBe(5000)
+      expect(await leegWal({ pogingen: 3, pauzeMs: 5 })).toBe(false)
+      setTimeout(() => ander.prepare('COMMIT').run(), 100)
+      expect(await leegWal({ pogingen: 20, pauzeMs: 20 })).toBe(true)
+      expect(statSync(`${db.pad}-wal`).size).toBe(0)
+    } finally {
+      ander.close()
+    }
   })
 })
 

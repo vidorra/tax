@@ -1,9 +1,15 @@
+# De context is normaal de uitgepakte deploy.tar (scripts/deploy-tarball.sh). Dit bestand houdt ook bij een build
+# vanuit de werkmap gegevens, geheimen en tests buiten de image.
 node_modules
-.next
+.next/cache
+.next/types
+.next/trace
 .git
+.github
 .env
 .env.*
-!.env.example
+!.env.production
+deploy.tar
 data
 **/*.db
 **/*.db-wal
@@ -13,6 +19,8 @@ coverage
 backups
 **/*.ibcbak
 **/prive
+**/__tests__
+**/*.spec.ts
 *.pdf
 .dev-account.json
 tsconfig.tsbuildinfo
