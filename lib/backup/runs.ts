@@ -1,128 +1,125 @@
 /**
- * Administratie van de back-ups in de tabel backups (migratie 0004).
+ * Administratie van de back-ups in de tabel backups.
  *
  * Een geplande back-up heeft per periode ('JJJJ-MM') precies één rij. claimGepland zet die rij atomair op
- * 'bezig', zodat twee servers (of twee tikken van de scheduler) nooit allebei dezelfde back-up mailen.
- * Een handmatige back-up krijgt steeds een nieuwe rij; startHandmatig bewaakt dat er niet te vaak of
- * dubbel wordt gestart.
+ * 'bezig', zodat twee tikken van de scheduler, de CLI naast de app of een tweede container tijdens een deploy
+ * nooit allebei dezelfde back-up mailen. Een handmatige back-up krijgt steeds een nieuwe rij; startHandmatig
+ * bewaakt dat er niet te vaak of dubbel wordt gestart.
+ *
+ * Gelijktijdigheid: claimGepland en startHandmatig lezen, beslissen en schrijven binnen één schrijf() (BEGIN
+ * IMMEDIATE). De schrijflock wordt bij de start genomen, dus tussen lezen en schrijven kan geen ander proces iets
+ * wijzigen, en binnen het proces ook niet (better-sqlite3 is synchroon). rondAf en markeerAfgebroken zijn één
+ * UPDATE en daarmee al atomair.
+ *
+ * Tijden: Date in de code, ISO-tekst (UTC) in de database. 'Nu' komt van de klok van de server (new Date()),
+ * niet van het moment dat de scheduler meegeeft, net als now() voorheen in Postgres.
  *
  * Foutmeldingen in de tabel zijn kort en zonder geheimen; dat bewaakt de aanroeper, rondAf kapt alleen af.
  */
-import { getPool } from '@/lib/db'
-import { LOCK } from '@/lib/db/locks'
+import { and, count, desc, eq, gt, inArray, lte } from 'drizzle-orm'
 
-import type { BackupRun, BackupSoort, BackupStatus, RijTelling } from './types'
+import { getDb, schrijf } from '@/lib/db'
+import { backups, type BackupRij } from '@/lib/db/schema'
 
-/** Advisory lock voor startHandmatig; alle sleutels staan in lib/db/locks.ts. */
-const HANDMATIG_LOCK = LOCK.backupHandmatig
+import { wachttijdUren } from './planning'
+import type { BackupRun, BackupStatus, RijTelling } from './types'
 
 /** Een run die zo lang 'bezig' is, is vastgelopen (bijvoorbeeld een herstart midden in het mailen). */
-const VASTGELOPEN_NA = "interval '1 hour'"
+export const VASTGELOPEN_NA_MS = 60 * 60_000
 
 /** Binnen deze tijd telt een lopende run als bezig voor startHandmatig. */
-const BEZIG_BINNEN = "interval '10 minutes'"
+export const BEZIG_BINNEN_MS = 10 * 60_000
 
 /** Maximaal aantal handmatige back-ups per uur. */
-const HANDMATIG_PER_UUR = 3
+export const HANDMATIG_PER_UUR = 3
+
+const UUR_MS = 60 * 60_000
 
 const MAX_FOUT = 300
 
-interface Rij {
-  id: number
-  soort: BackupSoort
-  periode: string | null
-  status: BackupStatus
-  pogingen: number
-  gestart_op: Date
-  afgerond_op: Date | null
-  bytes: number | null
-  sha256: string | null
-  rijen: RijTelling | null
-  fout: string | null
-}
+const PERIODE = /^\d{4}-(0[1-9]|1[0-2])$/
 
-function naarRun(r: Rij): BackupRun {
+function naarRun(r: BackupRij): BackupRun {
   return {
     id: r.id,
     soort: r.soort,
     periode: r.periode,
     status: r.status,
     pogingen: r.pogingen,
-    gestartOp: r.gestart_op.toISOString(),
-    afgerondOp: r.afgerond_op ? r.afgerond_op.toISOString() : null,
+    gestartOp: r.gestartOp.toISOString(),
+    afgerondOp: r.afgerondOp ? r.afgerondOp.toISOString() : null,
     bytes: r.bytes,
     sha256: r.sha256,
-    rijen: r.rijen,
+    rijen: r.rijen ?? null,
     fout: r.fout,
   }
 }
 
-const KOLOMMEN = 'id, soort, periode, status, pogingen, gestart_op, afgerond_op, bytes, sha256, rijen, fout'
+const voor = (nu: Date, ms: number) => new Date(nu.getTime() - ms)
 
 /**
- * Claimt de geplande back-up van een periode ('JJJJ-MM'). Eén statement, dus atomair: bij gelijktijdige
- * aanroepen krijgt er precies één een claim. Geeft null als de periode al gedaan is (verstuurd of
- * te-groot), nu bezig is, of na een mislukte poging nog in de wachttijd zit.
- *
- * De wachttijd na een mislukte poging is gelijk aan wachttijdUren(pogingen) in lib/backup/planning.ts:
- * 1, 2, 4, 8, 16 en daarna 24 uur, gerekend vanaf de start van de vorige poging. De exponent is begrensd
- * op 5, zodat power(2, ...) ook na heel veel pogingen niet buiten het bereik van integer valt.
- * Een run die langer dan een uur 'bezig' is, telt als vastgelopen en mag opnieuw.
+ * Mag een bestaande geplande run opnieuw? Na een mislukte poging pas na wachttijdUren(pogingen) (1, 2, 4, 8, 16 en
+ * daarna 24 uur, gerekend vanaf de start van die poging); een run die langer dan een uur 'bezig' is, is
+ * vastgelopen en mag ook opnieuw. Verstuurd en te-groot zijn klaar.
  */
-export async function claimGepland(periode: string): Promise<{ id: number; poging: number } | null> {
-  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(periode)) throw new Error('Periode moet de vorm JJJJ-MM hebben.')
-  const { rows } = await getPool().query<{ id: number; pogingen: number }>(
-    `INSERT INTO backups (soort, periode, status) VALUES ('gepland', $1, 'bezig')
-     ON CONFLICT (periode) WHERE soort = 'gepland' DO UPDATE
-        SET status = 'bezig', pogingen = backups.pogingen + 1, gestart_op = now(), afgerond_op = NULL,
-            fout = NULL, bytes = NULL, sha256 = NULL, rijen = NULL
-      WHERE (backups.status = 'mislukt'
-             AND backups.gestart_op <= now() - make_interval(hours => least(power(2, least(greatest(backups.pogingen - 1, 0), 5)), 24)::int))
-         OR (backups.status = 'bezig' AND backups.gestart_op <= now() - ${VASTGELOPEN_NA})
-     RETURNING id, pogingen`,
-    [periode],
-  )
-  const r = rows[0]
-  return r ? { id: r.id, poging: r.pogingen } : null
+function opnieuwTeClaimen(rij: Pick<BackupRij, 'status' | 'pogingen' | 'gestartOp'>, nu: Date): boolean {
+  if (rij.status === 'mislukt') return rij.gestartOp.getTime() <= nu.getTime() - wachttijdUren(rij.pogingen) * UUR_MS
+  if (rij.status === 'bezig') return rij.gestartOp.getTime() <= nu.getTime() - VASTGELOPEN_NA_MS
+  return false
+}
+
+/**
+ * Claimt de geplande back-up van een periode ('JJJJ-MM'): een nieuwe rij, of de bestaande rij opnieuw op 'bezig'
+ * met een poging erbij. Lezen, beslissen en schrijven gebeuren in één transactie met de schrijflock (BEGIN
+ * IMMEDIATE), dus bij gelijktijdige aanroepen, ook uit verschillende processen, krijgt er precies één een claim.
+ * Geeft null als de periode al gedaan is (verstuurd of te-groot), nu bezig is, of na een mislukte poging nog in de
+ * wachttijd zit. De partiële unieke index backups_periode_gepland_uniek blijft de vangrail.
+ */
+export async function claimGepland(periode: string, nu: Date = new Date()): Promise<{ id: number; poging: number } | null> {
+  if (!PERIODE.test(periode)) throw new Error('Periode moet de vorm JJJJ-MM hebben.')
+  return schrijf((tx) => {
+    const bestaand = tx
+      .select({ id: backups.id, status: backups.status, pogingen: backups.pogingen, gestartOp: backups.gestartOp })
+      .from(backups)
+      .where(and(eq(backups.soort, 'gepland'), eq(backups.periode, periode)))
+      .get()
+    if (!bestaand) {
+      const nieuw = tx.insert(backups).values({ soort: 'gepland', periode, status: 'bezig', gestartOp: nu }).returning({ id: backups.id }).get()
+      return { id: nieuw.id, poging: 1 }
+    }
+    if (!opnieuwTeClaimen(bestaand, nu)) return null
+    const poging = bestaand.pogingen + 1
+    tx.update(backups)
+      .set({ status: 'bezig', pogingen: poging, gestartOp: nu, afgerondOp: null, fout: null, bytes: null, sha256: null, rijen: null })
+      .where(eq(backups.id, bestaand.id))
+      .run()
+    return { id: bestaand.id, poging }
+  })
 }
 
 /**
  * Start een handmatige back-up. Geweigerd met 'bezig' als er in de afgelopen 10 minuten een run (gepland of
- * handmatig) is gestart die nog bezig is, en met 'te-vaak' bij 3 of meer handmatige runs in het afgelopen
- * uur. Een advisory lock in de transactie maakt controle en invoegen samen atomair.
+ * handmatig) is gestart die nog bezig is, en met 'te-vaak' bij 3 of meer handmatige runs in het afgelopen uur.
+ * Tellen en invoegen gebeuren in één transactie met de schrijflock, dus gelijktijdige aanroepen starten er
+ * hooguit één.
  */
-export async function startHandmatig(): Promise<{ id: number } | { geweigerd: 'bezig' | 'te-vaak' }> {
-  const client = await getPool().connect()
-  try {
-    await client.query('BEGIN')
-    await client.query('SELECT pg_advisory_xact_lock($1)', [HANDMATIG_LOCK])
-    // clock_timestamp: de tijd na het wachten op de lock, niet het begin van de transactie.
-    const { rows } = await client.query<{ bezig: number; handmatig: number }>(
-      `SELECT count(*) FILTER (WHERE status = 'bezig' AND gestart_op > clock_timestamp() - ${BEZIG_BINNEN})::int AS bezig,
-              count(*) FILTER (WHERE soort = 'handmatig')::int AS handmatig
-         FROM backups
-        WHERE gestart_op > clock_timestamp() - interval '1 hour'`,
-    )
-    const { bezig, handmatig } = rows[0] ?? { bezig: 0, handmatig: 0 }
-    let uitkomst: { id: number } | { geweigerd: 'bezig' | 'te-vaak' }
-    if (bezig > 0) {
-      uitkomst = { geweigerd: 'bezig' }
-    } else if (handmatig >= HANDMATIG_PER_UUR) {
-      uitkomst = { geweigerd: 'te-vaak' }
-    } else {
-      const ins = await client.query<{ id: number }>(
-        `INSERT INTO backups (soort, status, gestart_op) VALUES ('handmatig', 'bezig', clock_timestamp()) RETURNING id`,
-      )
-      uitkomst = { id: ins.rows[0].id }
-    }
-    await client.query('COMMIT')
-    return uitkomst
-  } catch (e) {
-    await client.query('ROLLBACK').catch(() => undefined)
-    throw e
-  } finally {
-    client.release()
-  }
+export async function startHandmatig(nu: Date = new Date()): Promise<{ id: number } | { geweigerd: 'bezig' | 'te-vaak' }> {
+  return schrijf((tx) => {
+    const bezig = tx
+      .select({ n: count() })
+      .from(backups)
+      .where(and(eq(backups.status, 'bezig'), gt(backups.gestartOp, voor(nu, BEZIG_BINNEN_MS))))
+      .get()!.n
+    if (bezig > 0) return { geweigerd: 'bezig' as const }
+    const handmatig = tx
+      .select({ n: count() })
+      .from(backups)
+      .where(and(eq(backups.soort, 'handmatig'), gt(backups.gestartOp, voor(nu, UUR_MS))))
+      .get()!.n
+    if (handmatig >= HANDMATIG_PER_UUR) return { geweigerd: 'te-vaak' as const }
+    const rij = tx.insert(backups).values({ soort: 'handmatig', status: 'bezig', gestartOp: nu }).returning({ id: backups.id }).get()
+    return { id: rij.id }
+  })
 }
 
 /**
@@ -131,15 +128,14 @@ export async function startHandmatig(): Promise<{ id: number } | { geweigerd: 'b
  */
 export async function rondAf(
   id: number,
-  uitkomst: { status: 'verstuurd' | 'mislukt' | 'te-groot'; bytes?: number; sha256?: string; rijen?: RijTelling; fout?: string },
+  uitkomst: { status: Exclude<BackupStatus, 'bezig'>; bytes?: number; sha256?: string; rijen?: RijTelling; fout?: string },
 ): Promise<void> {
   const fout = uitkomst.fout ? Array.from(uitkomst.fout).slice(0, MAX_FOUT).join('') : null
-  await getPool().query(
-    `UPDATE backups
-        SET status = $2, afgerond_op = now(), bytes = $3, sha256 = $4, rijen = $5::jsonb, fout = $6
-      WHERE id = $1 AND status = 'bezig'`,
-    [id, uitkomst.status, uitkomst.bytes ?? null, uitkomst.sha256 ?? null, uitkomst.rijen ? JSON.stringify(uitkomst.rijen) : null, fout],
-  )
+  getDb()
+    .update(backups)
+    .set({ status: uitkomst.status, afgerondOp: new Date(), bytes: uitkomst.bytes ?? null, sha256: uitkomst.sha256 ?? null, rijen: uitkomst.rijen ?? null, fout })
+    .where(and(eq(backups.id, id), eq(backups.status, 'bezig')))
+    .run()
 }
 
 /**
@@ -147,33 +143,32 @@ export async function rondAf(
  * na een herstart midden in een run. Een geplande run blijft daarna gewoon opnieuw te claimen (de wachttijd
  * na één poging is een uur, gerekend vanaf de start). Geeft het aantal bijgewerkte runs.
  */
-export async function markeerAfgebroken(): Promise<number> {
-  const r = await getPool().query(
-    `UPDATE backups
-        SET status = 'mislukt', afgerond_op = now(), fout = 'Afgebroken, bijvoorbeeld door een herstart van de server.'
-      WHERE status = 'bezig' AND gestart_op <= now() - ${VASTGELOPEN_NA}`,
-  )
-  return r.rowCount ?? 0
+export async function markeerAfgebroken(nu: Date = new Date()): Promise<number> {
+  return getDb()
+    .update(backups)
+    .set({ status: 'mislukt', afgerondOp: nu, fout: 'Afgebroken, bijvoorbeeld door een herstart van de server.' })
+    .where(and(eq(backups.status, 'bezig'), lte(backups.gestartOp, voor(nu, VASTGELOPEN_NA_MS))))
+    .run().changes
 }
 
 /** De laatst gestarte run, van welke soort ook. */
 export async function laatsteRun(): Promise<BackupRun | null> {
-  const { rows } = await getPool().query<Rij>(`SELECT ${KOLOMMEN} FROM backups ORDER BY gestart_op DESC, id DESC LIMIT 1`)
-  return rows[0] ? naarRun(rows[0]) : null
+  const r = getDb().select().from(backups).orderBy(desc(backups.gestartOp), desc(backups.id)).limit(1).get()
+  return r ? naarRun(r) : null
 }
 
-/** De laatste run die is verstuurd. */
+/** De laatste run die is verstuurd. (In SQLite komt NULL bij DESC achteraan.) */
 export async function laatsteGeslaagd(): Promise<BackupRun | null> {
-  const { rows } = await getPool().query<Rij>(
-    `SELECT ${KOLOMMEN} FROM backups WHERE status = 'verstuurd' ORDER BY afgerond_op DESC NULLS LAST, id DESC LIMIT 1`,
-  )
-  return rows[0] ? naarRun(rows[0]) : null
+  const r = getDb().select().from(backups).where(eq(backups.status, 'verstuurd')).orderBy(desc(backups.afgerondOp), desc(backups.id)).limit(1).get()
+  return r ? naarRun(r) : null
 }
 
 /** Periodes waarvan de geplande back-up klaar is: verstuurd of te groot om te mailen. */
 export async function gedanePeriodes(): Promise<Set<string>> {
-  const { rows } = await getPool().query<{ periode: string }>(
-    `SELECT periode FROM backups WHERE soort = 'gepland' AND status IN ('verstuurd', 'te-groot')`,
-  )
-  return new Set(rows.map((r) => r.periode))
+  const rijen = getDb()
+    .select({ periode: backups.periode })
+    .from(backups)
+    .where(and(eq(backups.soort, 'gepland'), inArray(backups.status, ['verstuurd', 'te-groot'])))
+    .all()
+  return new Set(rijen.map((r) => r.periode).filter((p): p is string => p !== null))
 }

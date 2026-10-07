@@ -3,14 +3,16 @@
  *
  * - Altijd, zonder database: sessie (401), herkomst (403), te groot (413), ongeldige invoer (422) en het geheim met
  *   `Cache-Control: no-store`.
- * - Met IB_TEST_DATABASE_URL (eigen schema, aan het eind weg): (a) faalt één jaar, dan wordt niets geschreven;
+ * - Met een database (per test een eigen SQLite-bestand, zie lib/db/testdb.ts): (a) faalt één jaar, dan wordt niets geschreven;
  *   (b) Ingediend blijft Ingediend, Gecontroleerd wordt Concept; (c) herstel zonder latere wijziging zet terug, na een
  *   opslag meldt het voorstel `gewijzigdNaImport` en voert de route pas uit met `bevestigd`; (d) een herstelpunt van
  *   31 dagen oud is weg na de volgende import. (8e, het verzoek uit de browser, staat in lib/import/__tests__.)
  */
 import { randomBytes } from 'node:crypto'
-import { Client } from 'pg'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { gebruikTijdelijkeDb } from '@/lib/db/testdb'
 import { voorbeeldInvoer } from '@/lib/voorbeeld'
 import type { HuishoudenInvoer } from '@/lib/tax/types'
 import type { JsonImportVerzoek } from '@/lib/import/types'
@@ -47,6 +49,10 @@ const herstelRoute = await import('@/app/api/dossier/import/herstel/route')
 const sleutelRoute = await import('@/app/api/dossier/import/sleutel/route')
 
 const SECRET = 'test-geheim-van-minimaal-tweeendertig-tekens-lang'
+const SLEUTEL = randomBytes(32).toString('base64')
+/** Zonder database: een plek die schrijfbaar is maar nooit wordt geopend (en nooit ./data van de werkmap). */
+const GEEN_DB = join(tmpdir(), 'ib-test-geen-db', 'ibcalculator.db')
+const DAG_MS = 24 * 60 * 60 * 1000
 
 function verzoek(pad: string, body?: unknown, headers: Record<string, string> = {}): Request {
   return new Request(`https://ib.example.nl${pad}`, {
@@ -78,10 +84,8 @@ let envKopie: NodeJS.ProcessEnv
 beforeEach(() => {
   envKopie = { ...process.env }
   process.env.AUTH_SECRET = SECRET
-  if (!h.echt) {
-    process.env.DATABASE_URL = 'postgres://niet-gebruikt'
-    process.env.DOSSIER_KEY = randomBytes(32).toString('base64')
-  }
+  process.env.DOSSIER_KEY = SLEUTEL
+  process.env.DATABASE_PATH = GEEN_DB
   cookieStore.clear()
   gebruikers.clear()
 })
@@ -122,48 +126,20 @@ describe('routes: controles vóór de database', () => {
   })
 })
 
-const BASIS_URL = process.env.IB_TEST_DATABASE_URL?.trim()
-const SCHEMA = `ib_import_${Date.now()}_${randomBytes(3).toString('hex')}`
-
-describe.skipIf(!BASIS_URL)('JSON-import op een echte database', () => {
-  let url = ''
-  let beheer: Client
-  let sleutel = ''
-  const dbEnv = () => {
-    process.env.DATABASE_URL = url
-    process.env.DOSSIER_KEY = sleutel
-  }
-
-  beforeAll(async () => {
-    const u = new URL(BASIS_URL!)
-    u.searchParams.set('options', `-c search_path=${SCHEMA}`)
-    url = u.toString()
-    sleutel = randomBytes(32).toString('base64')
-    beheer = new Client({ connectionString: BASIS_URL })
-    await beheer.connect()
-    await beheer.query(`CREATE SCHEMA ${SCHEMA}`)
-    delete (globalThis as Record<string, unknown>).__ibDb
+describe('JSON-import op een echte database', () => {
+  gebruikTijdelijkeDb()
+  beforeAll(() => {
     h.echt = true
-    dbEnv()
-    const { migreer } = await import('@/scripts/migrate')
-    await migreer(url, undefined, () => undefined)
   })
-  beforeEach(dbEnv)
-
-  afterAll(async () => {
+  afterAll(() => {
     h.echt = false
-    const { getPool } = await import('@/lib/db')
-    await getPool().end().catch(() => undefined)
-    delete (globalThis as Record<string, unknown>).__ibDb
-    await beheer.query(`DROP SCHEMA IF EXISTS ${SCHEMA} CASCADE`)
-    await beheer.end()
   })
 
   async function huishouden(email: string): Promise<{ userId: number; householdId: number }> {
     const { getDb } = await import('@/lib/db')
     const { users } = await import('@/lib/db/schema')
     const { huishoudenVan } = await import('@/lib/dossier/opslag')
-    const [u] = await getDb().insert(users).values({ email, passwordHash: 'x', totpEnabled: true }).returning()
+    const u = getDb().insert(users).values({ email, passwordHash: 'x', totpEnabled: true }).returning().get()!
     return { userId: u.id, householdId: await huishoudenVan(u.id) }
   }
 
@@ -171,7 +147,13 @@ describe.skipIf(!BASIS_URL)('JSON-import op een echte database', () => {
     const { getDb } = await import('@/lib/db')
     const { dossierYears } = await import('@/lib/db/schema')
     const { eq } = await import('drizzle-orm')
-    return (await getDb().select().from(dossierYears).where(eq(dossierYears.householdId, householdId))).sort((a, b) => a.jaar - b.jaar)
+    return getDb().select().from(dossierYears).where(eq(dossierYears.householdId, householdId)).all().sort((a, b) => a.jaar - b.jaar)
+  }
+
+  /** Zet het moment van de herstelpunten van een huishouden `dagen` terug (ruwe SQL: ISO-tekst in UTC). */
+  async function verouder(householdId: number, dagen: number) {
+    const { getSqlite } = await import('@/lib/db')
+    getSqlite().prepare('UPDATE herstelpunten SET aangemaakt = ? WHERE household_id = ?').run(new Date(Date.now() - dagen * DAG_MS).toISOString(), householdId)
   }
 
   it('(a) faalt één jaar, dan wordt niets geschreven: ook geen herstelpunt', async () => {
@@ -232,9 +214,11 @@ describe.skipIf(!BASIS_URL)('JSON-import op een echte database', () => {
     expect((await laadAangifteStaat(ctx.householdId, 2025))!.staat.controles?.streng?.door).toBe('paneel')
 
     // Het herstelpunt is versleuteld: geen omschrijving in de database.
-    const rijen = await beheer.query(`SELECT inhoud_enc FROM ${SCHEMA}.herstelpunten WHERE household_id = $1`, [ctx.householdId])
-    expect(rijen.rows).toHaveLength(1)
-    expect(rijen.rows[0].inhoud_enc).not.toContain('Spaarrekening')
+    const { getSqlite } = await import('@/lib/db')
+    const rijen = getSqlite().prepare('SELECT inhoud_enc FROM herstelpunten WHERE household_id = ?').all(ctx.householdId) as Array<{ inhoud_enc: string }>
+    expect(rijen).toHaveLength(1)
+    expect(rijen[0].inhoud_enc.startsWith('v2.')).toBe(true)
+    expect(rijen[0].inhoud_enc).not.toContain('Spaarrekening')
 
     // (c) Zonder latere wijziging: het voorstel meldt niets, herstel zet terug en verwijdert het toegevoegde jaar.
     const voorstel = await herstelVoorstel(ctx, r.herstelpuntId!)
@@ -279,7 +263,7 @@ describe.skipIf(!BASIS_URL)('JSON-import op een echte database', () => {
     await importeerJson(een, v(2025, 'vervangen'))
     expect(await telHerstelpunten(een.householdId)).toBe(1)
 
-    await beheer.query(`UPDATE ${SCHEMA}.herstelpunten SET aangemaakt = now() - interval '31 days' WHERE household_id = $1`, [een.householdId])
+    await verouder(een.householdId, 31)
     await importeerJson(twee, v(2024, 'toevoegen'))
     expect(await telHerstelpunten(een.householdId)).toBe(0)
     expect(await telHerstelpunten(twee.householdId)).toBe(1)

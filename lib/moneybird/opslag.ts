@@ -10,9 +10,16 @@
  *   de database en kan niet worden verwijderd. Haar indeling bewaren we in een rij met soort
  *   'moneybird-env' zonder token: zo staat alle Moneybird-informatie in één tabel, gaat ze mee in de
  *   export en verdwijnt ze via de cascade als het huishouden wordt verwijderd.
+ *
+ * Gelijktijdigheid: alles wat eerst leest en daarna schrijft, gebeurt in één synchrone schrijf() (BEGIN
+ * IMMEDIATE, zie lib/db). Het maximum van tien koppelingen, de ene omgevingsrij per huishouden en het
+ * samenvoegen van de indeling kunnen zo niet door een gelijktijdig verzoek of een ander proces worden
+ * doorkruist. Moneybird aanroepen gebeurt altijd vóór of na zo'n transactie, nooit erin. De partiële unieke
+ * index koppelingen_env_uniek blijft de vangrail voor de omgevingsrij. Id's zijn AUTOINCREMENT en worden dus
+ * nooit hergebruikt: een update op een id dat intussen is verwijderd, raakt geen andere koppeling.
  */
-import { and, asc, count, eq, sql } from 'drizzle-orm'
-import { getDb } from '@/lib/db'
+import { and, asc, count, eq } from 'drizzle-orm'
+import { getDb, lees, schrijf, type Db, type Tx } from '@/lib/db'
 import { koppelingen, type KoppelingRij } from '@/lib/db/schema'
 import { ontsleutel, versleutel } from '@/lib/crypto'
 import { geldigMbId, maakClient, maskeer, type MbOpties } from './client'
@@ -24,7 +31,9 @@ export const ENV_ID = 'env'
 const SOORT = 'moneybird'
 const SOORT_ENV = 'moneybird-env'
 const ENV_LABEL = 'Moneybird (server)'
-// Advisory lock 724003 per huishouden: maximaal tien koppelingen en één omgevingsrij, ook bij gelijktijdige verzoeken.
+
+/** De verbinding (getDb()) of een transactie uit schrijf()/lees(); de queries hieronder zijn synchroon. */
+type Lezer = Db | Tx
 
 export const aadKoppeling = {
   token: (householdId: number, id: number) => `koppelingen:${householdId}:${id}:token`,
@@ -99,30 +108,18 @@ function publiek(rij: KoppelingRij): MbKoppelingPubliek {
   }
 }
 
-async function envRij(householdId: number): Promise<KoppelingRij | null> {
-  const [rij] = await getDb()
-    .select()
-    .from(koppelingen)
-    .where(and(eq(koppelingen.householdId, householdId), eq(koppelingen.soort, SOORT_ENV)))
-    .limit(1)
-  return rij ?? null
+const vanHuishouden = (householdId: number, soort: string) => and(eq(koppelingen.householdId, householdId), eq(koppelingen.soort, soort))
+
+function envRij(db: Lezer, householdId: number): KoppelingRij | null {
+  return db.select().from(koppelingen).where(vanHuishouden(householdId, SOORT_ENV)).limit(1).get() ?? null
 }
 
-/** De rij van de omgevingskoppeling; maakt hem aan als hij nog niet bestaat. */
-async function zorgEnvRij(householdId: number): Promise<KoppelingRij> {
-  const bestaand = await envRij(householdId)
-  if (bestaand) return bestaand
-  return getDb().transaction(async (tx) => {
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(724003, ${householdId})`)
-    const [opnieuw] = await tx
-      .select()
-      .from(koppelingen)
-      .where(and(eq(koppelingen.householdId, householdId), eq(koppelingen.soort, SOORT_ENV)))
-      .limit(1)
-    if (opnieuw) return opnieuw
-    const [rij] = await tx.insert(koppelingen).values({ householdId, soort: SOORT_ENV, label: ENV_LABEL, tokenEnc: '' }).returning()
-    return rij
-  })
+/**
+ * Binnen schrijf(): de rij van de omgevingskoppeling, aangemaakt als hij nog niet bestaat. Doordat lezen en
+ * aanmaken in dezelfde BEGIN IMMEDIATE-transactie gebeuren, ontstaat er per huishouden maar één.
+ */
+function zorgEnvRijTx(tx: Tx, householdId: number): KoppelingRij {
+  return envRij(tx, householdId) ?? tx.insert(koppelingen).values({ householdId, soort: SOORT_ENV, label: ENV_LABEL, tokenEnc: '' }).returning().get()
 }
 
 function envPubliek(env: { token: string; administratieId: string }, rij: KoppelingRij | null): MbKoppelingPubliek {
@@ -138,24 +135,25 @@ function envPubliek(env: { token: string; administratieId: string }, rij: Koppel
   }
 }
 
-async function rijVan(householdId: number, id: number): Promise<KoppelingRij | null> {
-  const [rij] = await getDb()
-    .select()
-    .from(koppelingen)
-    .where(and(eq(koppelingen.id, id), eq(koppelingen.householdId, householdId), eq(koppelingen.soort, SOORT)))
-    .limit(1)
-  return rij ?? null
+function rijVan(db: Lezer, householdId: number, id: number): KoppelingRij | null {
+  return (
+    db
+      .select()
+      .from(koppelingen)
+      .where(and(eq(koppelingen.id, id), vanHuishouden(householdId, SOORT)))
+      .limit(1)
+      .get() ?? null
+  )
 }
 
 export async function lijstKoppelingen(householdId: number): Promise<MbKoppelingPubliek[]> {
-  const uit: MbKoppelingPubliek[] = []
   const env = envKoppeling()
-  if (env) uit.push(envPubliek(env, await envRij(householdId)))
-  const rijen = await getDb()
-    .select()
-    .from(koppelingen)
-    .where(and(eq(koppelingen.householdId, householdId), eq(koppelingen.soort, SOORT)))
-    .orderBy(asc(koppelingen.id))
+  // Eén leesmoment, zodat omgevingsrij en koppelingen bij elkaar horen.
+  const { omgeving, rijen } = lees((tx) => ({
+    omgeving: env ? envRij(tx, householdId) : null,
+    rijen: tx.select().from(koppelingen).where(vanHuishouden(householdId, SOORT)).orderBy(asc(koppelingen.id)).all(),
+  }))
+  const uit: MbKoppelingPubliek[] = env ? [envPubliek(env, omgeving)] : []
   uit.push(...rijen.map(publiek))
   return uit
 }
@@ -163,6 +161,10 @@ export async function lijstKoppelingen(householdId: number): Promise<MbKoppeling
 /**
  * Voegt een koppeling toe. Controleert het token eerst bij Moneybird (gooit een MoneybirdFout als
  * het niet werkt). Heeft het token precies één administratie, dan wordt die meteen gekozen.
+ *
+ * De controle bij Moneybird is async en gebeurt vóór de transactie. Tellen, invoegen en versleutelen met het
+ * nieuwe id gebeuren daarna in één schrijf(): komen er intussen koppelingen bij (een ander verzoek of proces),
+ * dan telt de transactie die mee en weigert met 409 boven het maximum.
  */
 export async function maakKoppeling(
   householdId: number,
@@ -171,22 +173,21 @@ export async function maakKoppeling(
 ): Promise<{ koppeling: MbKoppelingPubliek; administraties: MbAdministratie[] }> {
   const administraties = await maakClient(invoer.token, null, opties).administraties()
   const enige = administraties.length === 1 ? administraties[0] : null
-  const rij = await getDb().transaction(async (tx) => {
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(724003, ${householdId})`)
-    const [{ aantal }] = await tx
-      .select({ aantal: count() })
-      .from(koppelingen)
-      .where(and(eq(koppelingen.householdId, householdId), eq(koppelingen.soort, SOORT)))
+  const rij = schrijf((tx) => {
+    const aantal = tx.select({ aantal: count() }).from(koppelingen).where(vanHuishouden(householdId, SOORT)).get()?.aantal ?? 0
     if (aantal >= MAX_KOPPELINGEN) throw new KoppelingFout(409, `Je kunt maximaal ${MAX_KOPPELINGEN} koppelingen hebben. Verwijder er eerst een.`)
-    const [nieuw] = await tx
+    const { id } = tx
       .insert(koppelingen)
       .values({ householdId, soort: SOORT, label: invoer.label, tokenEnc: 'tijdelijk', administratieId: enige?.id ?? null, administratieNaam: enige?.naam ?? null })
       .returning({ id: koppelingen.id })
-    const [klaar] = await tx
+      .get()
+    const klaar = tx
       .update(koppelingen)
-      .set({ tokenEnc: versleutel(invoer.token, aadKoppeling.token(householdId, nieuw.id)) })
-      .where(eq(koppelingen.id, nieuw.id))
+      .set({ tokenEnc: versleutel(invoer.token, aadKoppeling.token(householdId, id)) })
+      .where(eq(koppelingen.id, id))
       .returning()
+      .get()
+    if (!klaar) throw new Error('De nieuwe koppeling is niet teruggevonden.')
     return klaar
   })
   return { koppeling: publiek(rij), administraties }
@@ -199,7 +200,11 @@ export async function administratiesVan(householdId: number, id: KoppelingId, op
   return maakClient(k.token, null, opties).administraties()
 }
 
-/** Kiest de administratie (moet bij het token horen) en eventueel een nieuw label. */
+/**
+ * Kiest de administratie (moet bij het token horen) en eventueel een nieuw label. Moneybird wordt tussen het
+ * lezen en de update gevraagd, dus niet in een transactie; de update is één statement en geeft null als de
+ * koppeling intussen is verwijderd.
+ */
 export async function kiesAdministratie(
   householdId: number,
   id: KoppelingId,
@@ -213,27 +218,29 @@ export async function kiesAdministratie(
     if (administratieId !== env.administratieId || label !== undefined) {
       throw new KoppelingFout(409, 'De koppeling uit de omgeving gebruikt altijd MONEYBIRD_ADMINISTRATION_ID en kan hier niet worden aangepast.')
     }
-    return envPubliek(env, await envRij(householdId))
+    return envPubliek(env, envRij(getDb(), householdId))
   }
-  const rij = await rijVan(householdId, id)
+  const rij = rijVan(getDb(), householdId, id)
   if (!rij) return null
   const administraties = await maakClient(tokenUit(rij), null, opties).administraties()
   const gekozen = administraties.find((a) => a.id === administratieId)
   if (!gekozen) throw new KoppelingFout(422, 'Deze administratie hoort niet bij het token van deze koppeling.')
-  const [bij] = await getDb()
+  const bij = getDb()
     .update(koppelingen)
     .set({ administratieId: gekozen.id, administratieNaam: gekozen.naam, ...(label !== undefined ? { label } : {}) })
-    .where(and(eq(koppelingen.id, id), eq(koppelingen.householdId, householdId)))
+    .where(and(eq(koppelingen.id, id), vanHuishouden(householdId, SOORT)))
     .returning()
+    .get()
   return bij ? publiek(bij) : null
 }
 
 export async function verwijderKoppeling(householdId: number, id: KoppelingId): Promise<boolean> {
   if (id === ENV_ID) throw new KoppelingFout(409, 'De koppeling uit de omgeving kan niet worden verwijderd. Haal MONEYBIRD_TOKEN weg uit de serverinstellingen.')
-  const weg = await getDb()
+  const weg = getDb()
     .delete(koppelingen)
-    .where(and(eq(koppelingen.id, id), eq(koppelingen.householdId, householdId), eq(koppelingen.soort, SOORT)))
+    .where(and(eq(koppelingen.id, id), vanHuishouden(householdId, SOORT)))
     .returning({ id: koppelingen.id })
+    .all()
   return weg.length > 0
 }
 
@@ -252,7 +259,7 @@ export async function laadKoppeling(householdId: number, id: KoppelingId): Promi
   if (id === ENV_ID) {
     const env = envKoppeling()
     if (!env) return null
-    const rij = await envRij(householdId)
+    const rij = envRij(getDb(), householdId)
     return {
       id: ENV_ID,
       token: env.token,
@@ -261,7 +268,7 @@ export async function laadKoppeling(householdId: number, id: KoppelingId): Promi
       label: ENV_LABEL,
     }
   }
-  const rij = await rijVan(householdId, id)
+  const rij = rijVan(getDb(), householdId, id)
   if (!rij) return null
   return {
     id: String(rij.id),
@@ -284,8 +291,8 @@ function indelingUit(rij: KoppelingRij | null): MbIndeling {
 
 /** Bewaarde indeling; null als de koppeling niet bestaat. */
 export async function laadIndeling(householdId: number, id: KoppelingId): Promise<MbIndeling | null> {
-  if (id === ENV_ID) return envKoppeling() ? indelingUit(await envRij(householdId)) : null
-  const rij = await rijVan(householdId, id)
+  if (id === ENV_ID) return envKoppeling() ? indelingUit(envRij(getDb(), householdId)) : null
+  const rij = rijVan(getDb(), householdId, id)
   return rij ? indelingUit(rij) : null
 }
 
@@ -293,30 +300,27 @@ export async function laadIndeling(householdId: number, id: KoppelingId): Promis
  * Voegt een wijziging samen met de bewaarde indeling: een categorie zet een keuze, null wist hem.
  * Keuzes voor grootboekrekeningen die in deze wijziging niet voorkomen (bijv. uit een ander jaar) blijven staan.
  * null als de koppeling niet bestaat.
+ *
+ * Lezen, samenvoegen en terugschrijven gebeuren in één schrijf(), zodat twee gelijktijdige wijzigingen elkaar
+ * niet overschrijven. Boven het maximum gaat er niets de database in, ook geen nieuwe omgevingsrij.
  */
 export async function bewaarIndeling(householdId: number, id: KoppelingId, wijziging: MbIndelingWijziging): Promise<MbIndeling | null> {
-  const bestaand = (await laadIndeling(householdId, id)) ?? null
-  if (bestaand === null && id !== ENV_ID && !(await rijVan(householdId, id))) return null
-  const indeling: MbIndeling = { ...(bestaand ?? {}) }
-  for (const [k, v] of Object.entries(wijziging)) {
-    if (v === null) delete indeling[k]
-    else indeling[k] = v
-  }
-  if (Object.keys(indeling).length > MAX_INDELING_REGELS) throw new KoppelingFout(422, `De indeling mag maximaal ${MAX_INDELING_REGELS} grootboekrekeningen bevatten.`)
-  let rijId: number
-  if (id === ENV_ID) {
-    if (!envKoppeling()) return null
-    rijId = (await zorgEnvRij(householdId)).id
-  } else {
-    const rij = await rijVan(householdId, id)
+  if (id === ENV_ID && !envKoppeling()) return null
+  return schrijf((tx) => {
+    const rij = id === ENV_ID ? zorgEnvRijTx(tx, householdId) : rijVan(tx, householdId, id)
     if (!rij) return null
-    rijId = rij.id
-  }
-  await getDb()
-    .update(koppelingen)
-    .set({ indelingEnc: versleutel(indeling, aadKoppeling.indeling(householdId, rijId)) })
-    .where(and(eq(koppelingen.id, rijId), eq(koppelingen.householdId, householdId)))
-  return indeling
+    const indeling: MbIndeling = { ...indelingUit(rij) }
+    for (const [k, v] of Object.entries(wijziging)) {
+      if (v === null) delete indeling[k]
+      else indeling[k] = v
+    }
+    if (Object.keys(indeling).length > MAX_INDELING_REGELS) throw new KoppelingFout(422, `De indeling mag maximaal ${MAX_INDELING_REGELS} grootboekrekeningen bevatten.`)
+    tx.update(koppelingen)
+      .set({ indelingEnc: versleutel(indeling, aadKoppeling.indeling(householdId, rij.id)) })
+      .where(and(eq(koppelingen.id, rij.id), eq(koppelingen.householdId, householdId)))
+      .run()
+    return indeling
+  })
 }
 
 /** Werkt laatst_gebruikt bij (en voor de omgevingskoppeling de naam van de administratie). */
@@ -324,22 +328,28 @@ export async function raakAan(householdId: number, id: KoppelingId, administrati
   const nu = new Date()
   if (id === ENV_ID) {
     if (!envKoppeling()) return
-    const rij = await zorgEnvRij(householdId)
-    await getDb()
-      .update(koppelingen)
-      .set({ laatstGebruikt: nu, ...(administratieNaam ? { administratieNaam } : {}) })
-      .where(eq(koppelingen.id, rij.id))
+    schrijf((tx) => {
+      const rij = zorgEnvRijTx(tx, householdId)
+      tx.update(koppelingen)
+        .set({ laatstGebruikt: nu, ...(administratieNaam ? { administratieNaam } : {}) })
+        .where(eq(koppelingen.id, rij.id))
+        .run()
+    })
     return
   }
-  await getDb()
+  getDb()
     .update(koppelingen)
     .set({ laatstGebruikt: nu })
-    .where(and(eq(koppelingen.id, id), eq(koppelingen.householdId, householdId)))
+    .where(and(eq(koppelingen.id, id), vanHuishouden(householdId, SOORT)))
+    .run()
 }
 
-/** Koppelingen voor de AVG-export: alles behalve het token. */
-export async function exporteerKoppelingen(householdId: number) {
-  const rijen = await getDb().select().from(koppelingen).where(eq(koppelingen.householdId, householdId)).orderBy(asc(koppelingen.id))
+/**
+ * Koppelingen voor de AVG-export: alles behalve het token. Synchroon; geef binnen lees() of schrijf() de
+ * transactie mee als `db`, zodat de koppelingen bij hetzelfde leesmoment horen als de rest van de export.
+ */
+export function exporteerKoppelingen(householdId: number, db: Lezer = getDb()) {
+  const rijen = db.select().from(koppelingen).where(eq(koppelingen.householdId, householdId)).orderBy(asc(koppelingen.id)).all()
   return rijen.map((r) => ({
     id: r.soort === SOORT_ENV ? ENV_ID : String(r.id),
     soort: r.soort,

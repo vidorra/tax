@@ -1,18 +1,19 @@
 /**
- * Review ronde 2, bevindingen 14, 15 en 20 (met IB_TEST_DATABASE_URL, eigen schema, aan het eind weg):
+ * Review ronde 2, bevindingen 14, 15 en 20 (per test een eigen SQLite-bestand, zie lib/db/testdb.ts):
  * - Vervangen met een concept uit het bestand zet een Ingediend jaar niet terug: het blijft Ingediend, de indiendatum
  *   blijft staan en het jaar is "gewijzigd na indienen".
  * - Het overzicht krijgt het geldige herstelpunt (`actiefHerstelpunt`), ook zonder de state van de import.
  * - Na 30 dagen is het herstelpunt weg, ook zonder nieuwe import (`ruimVerlopenHerstelpuntenOp`, `actiefHerstelpunt`).
  */
 import { randomBytes } from 'node:crypto'
-import { Client } from 'pg'
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { getDb, getSqlite } from '@/lib/db'
+import { users } from '@/lib/db/schema'
+import { gebruikTijdelijkeDb } from '@/lib/db/testdb'
 import type { HuishoudenInvoer } from '@/lib/tax/types'
 import { leegInvoer } from '@/lib/dossier/leeg'
 
-const BASIS_URL = process.env.IB_TEST_DATABASE_URL?.trim()
-const SCHEMA = `ib_herstel_${Date.now()}_${randomBytes(3).toString('hex')}`
+const DAG_MS = 24 * 60 * 60 * 1000
 
 function invoer(jaar: number, omschrijving: string): HuishoudenInvoer {
   const i = leegInvoer(jaar)
@@ -21,45 +22,34 @@ function invoer(jaar: number, omschrijving: string): HuishoudenInvoer {
   return i
 }
 
-describe.skipIf(!BASIS_URL)('herstelpunt en status bij de JSON-import, op een echte database', () => {
-  let url = ''
-  let sleutel = ''
-  let beheer: Client
-  let envKopie: NodeJS.ProcessEnv
+/** Ruwe rij van een jaar, zoals hij in het bestand staat (tijdstip als ISO-tekst, boolean als 0/1). */
+function ruweJaarRij(householdId: number, jaar: number) {
+  return getSqlite().prepare('SELECT status, ingediend_op, gewijzigd_na_indienen FROM dossier_years WHERE household_id = ? AND jaar = ?').get(householdId, jaar) as {
+    status: string
+    ingediend_op: string | null
+    gewijzigd_na_indienen: number
+  }
+}
 
-  beforeAll(async () => {
-    envKopie = { ...process.env }
-    const u = new URL(BASIS_URL!)
-    u.searchParams.set('options', `-c search_path=${SCHEMA}`)
-    url = u.toString()
-    sleutel = randomBytes(32).toString('base64')
-    beheer = new Client({ connectionString: BASIS_URL })
-    await beheer.connect()
-    await beheer.query(`CREATE SCHEMA ${SCHEMA}`)
-    delete (globalThis as Record<string, unknown>).__ibDb
-    process.env.DATABASE_URL = url
-    process.env.DOSSIER_KEY = sleutel
-    const { migreer } = await import('@/scripts/migrate')
-    await migreer(url, undefined, () => undefined)
+/** Zet het moment van de herstelpunten van een huishouden `dagen` terug. */
+function verouder(householdId: number, dagen: number) {
+  getSqlite().prepare('UPDATE herstelpunten SET aangemaakt = ? WHERE household_id = ?').run(new Date(Date.now() - dagen * DAG_MS).toISOString(), householdId)
+}
+
+describe('herstelpunt en status bij de JSON-import, op een echte database', () => {
+  const vorigeSleutel = process.env.DOSSIER_KEY
+  beforeAll(() => {
+    process.env.DOSSIER_KEY = randomBytes(32).toString('base64')
   })
-  beforeEach(() => {
-    process.env.DATABASE_URL = url
-    process.env.DOSSIER_KEY = sleutel
+  afterAll(() => {
+    if (vorigeSleutel === undefined) delete process.env.DOSSIER_KEY
+    else process.env.DOSSIER_KEY = vorigeSleutel
   })
-  afterAll(async () => {
-    const { getPool } = await import('@/lib/db')
-    await getPool().end().catch(() => undefined)
-    delete (globalThis as Record<string, unknown>).__ibDb
-    await beheer.query(`DROP SCHEMA IF EXISTS ${SCHEMA} CASCADE`)
-    await beheer.end()
-    process.env = envKopie
-  })
+  gebruikTijdelijkeDb()
 
   async function huishouden(email: string): Promise<{ userId: number; householdId: number }> {
-    const { getDb } = await import('@/lib/db')
-    const { users } = await import('@/lib/db/schema')
     const { huishoudenVan } = await import('@/lib/dossier/opslag')
-    const [u] = await getDb().insert(users).values({ email, passwordHash: 'x', totpEnabled: true }).returning()
+    const u = getDb().insert(users).values({ email, passwordHash: 'x', totpEnabled: true }).returning().get()!
     return { userId: u.id, householdId: await huishoudenVan(u.id) }
   }
 
@@ -71,7 +61,8 @@ describe.skipIf(!BASIS_URL)('herstelpunt en status bij de JSON-import, op een ec
     await opslag.bewaarJaar(ctx.householdId, 2024, { invoer: invoer(2024, 'Spaarrekening'), status: 'ingediend', variant: null })
     const voor = (await opslag.lijstJaren(ctx.householdId)).find((j) => j.jaar === 2024)!
     expect(voor.status).toBe('ingediend')
-    const ingediendOp = await beheer.query(`SELECT ingediend_op FROM ${SCHEMA}.dossier_years WHERE household_id = $1 AND jaar = 2024`, [ctx.householdId])
+    const ingediendOp = ruweJaarRij(ctx.householdId, 2024).ingediend_op
+    expect(ingediendOp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/)
 
     const r = await importeerJson(
       ctx,
@@ -79,10 +70,10 @@ describe.skipIf(!BASIS_URL)('herstelpunt en status bij de JSON-import, op een ec
       { nu: new Date('2026-10-05T10:00:00Z') },
     )
     expect(r.meldingen).toEqual(['2024 is vervangen; de vorige versie is bewaard. Het blijft op Ingediend staan, want je had het al ingediend.'])
-    const na = await beheer.query(`SELECT status, ingediend_op, gewijzigd_na_indienen FROM ${SCHEMA}.dossier_years WHERE household_id = $1 AND jaar = 2024`, [ctx.householdId])
-    expect(na.rows[0].status).toBe('ingediend')
-    expect(new Date(na.rows[0].ingediend_op).getTime()).toBe(new Date(ingediendOp.rows[0].ingediend_op).getTime())
-    expect(na.rows[0].gewijzigd_na_indienen).toBe(true)
+    const na = ruweJaarRij(ctx.householdId, 2024)
+    expect(na.status).toBe('ingediend')
+    expect(na.ingediend_op).toBe(ingediendOp)
+    expect(na.gewijzigd_na_indienen).toBe(1)
 
     // Het overzicht kent het herstelpunt ook zonder de state van de import (na herladen).
     const actief = await actiefHerstelpunt(ctx.householdId, { nu: new Date('2026-10-20T10:00:00Z') })
@@ -96,7 +87,7 @@ describe.skipIf(!BASIS_URL)('herstelpunt en status bij de JSON-import, op een ec
     const v = (jaar: number) => controleerVerzoek({ formaat: 'ibcalculator-jaar', versie: 1, jaren: [{ jaar, actie: 'toevoegen', invoer: invoer(jaar, 'Rekening') }] })
     await importeerJson(een, v(2025))
     await importeerJson(twee, v(2025))
-    await beheer.query(`UPDATE ${SCHEMA}.herstelpunten SET aangemaakt = now() - interval '45 days' WHERE household_id = $1`, [een.householdId])
+    verouder(een.householdId, 45)
 
     // Het overzicht toont een verlopen herstelpunt niet en ruimt het meteen op.
     expect(await actiefHerstelpunt(een.householdId)).toBeNull()
@@ -104,7 +95,7 @@ describe.skipIf(!BASIS_URL)('herstelpunt en status bij de JSON-import, op een ec
     expect(await actiefHerstelpunt(twee.householdId)).not.toBeNull()
 
     // Ook de opruiming zonder overzicht (paginaContext, back-up) haalt alleen verlopen herstelpunten weg.
-    await beheer.query(`UPDATE ${SCHEMA}.herstelpunten SET aangemaakt = now() - interval '31 days' WHERE household_id = $1`, [twee.householdId])
+    verouder(twee.householdId, 31)
     await ruimVerlopenHerstelpuntenOp()
     expect(await telHerstelpunten(twee.householdId)).toBe(0)
   })

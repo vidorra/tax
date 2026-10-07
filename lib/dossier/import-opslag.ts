@@ -3,9 +3,11 @@
  * (`JsonImportVerzoek`); de server vertrouwt niets daarvan en valideert alles opnieuw met dezelfde regels als bij
  * opslaan: `valideerInvoer`, de variant, `schoonAccountantRegels`, `schoonStaat` en `schoonGegevens`.
  *
- * Alles gebeurt in één transactie: herstelpunt maken (per jaar de vorige versie of null, en na het schrijven de versie
- * direct na de import), toevoegen (`maakJaarTx`) of vervangen (`bewaarJaarTx`), de accountantsbedragen
- * (`bewaarAccountantTx`) en de aangiftestaat (`vervangAangifteStaatTx`). Faalt één jaar, dan verandert er niets.
+ * Alles gebeurt in één schrijf() (BEGIN IMMEDIATE, één schrijver tegelijk): herstelpunt maken (per jaar de vorige
+ * versie of null, en na het schrijven de versie direct na de import), toevoegen (`maakJaarTx`) of vervangen
+ * (`bewaarJaarTx`), de accountantsbedragen (`bewaarAccountantTx`) en de aangiftestaat (`vervangAangifteStaatTx`). Faalt
+ * één jaar, dan verandert er niets. Herstellen gaat net zo in één schrijf(); een import en een herstel (of twee
+ * imports) van hetzelfde huishouden lopen dus nooit door elkaar.
  *
  * Status: Ingediend is een feit. Ingediend uit het bestand blijft Ingediend, en een jaar dat in het dossier al op
  * Ingediend stond, blijft dat bij Vervangen (ook met een concept uit het bestand; de melding zegt het). Gecontroleerd
@@ -20,8 +22,8 @@
  * `rekeningsleutel:<householdId>`. De browser rekent daarmee de sleutel uit; het rekeningnummer komt nooit hier.
  */
 import { createHmac, randomBytes } from 'node:crypto'
-import { and, desc, eq, gte, lt, sql } from 'drizzle-orm'
-import { getDb } from '@/lib/db'
+import { and, count, desc, eq, gte, lt } from 'drizzle-orm'
+import { getDb, schrijf, type Db, type Tx } from '@/lib/db'
 import { aangifteStaat, accountantDocs, dossierYears, herstelpunten, households } from '@/lib/db/schema'
 import { dossierSleutel, ontsleutel, versleutel } from '@/lib/crypto'
 import { BESCHIKBARE_JAREN } from '@/lib/tax/years'
@@ -30,7 +32,7 @@ import type { HuishoudenGegevens } from '@/lib/rapport/model'
 import { HERSTELPUNT_BEWAARDAGEN, type ActiefHerstelpunt, type HerstelResultaat, type HerstelVoorstel, type ImportHerstelpunt, type JsonImportResultaat } from '@/lib/import/types'
 import { DOSSIER_VERSIE, MAX_FOUTEN, MAX_JAREN, TEKST } from '@/lib/import/json'
 import { statusNaImport } from '@/lib/import/json-keuzes'
-import { aad, bewaarAccountantTx, bewaarJaarTx, maakJaarTx, variantGeldig, type DbTx } from './opslag'
+import { aad, bewaarAccountantTx, bewaarJaarTx, maakJaarTx, variantGeldig } from './opslag'
 import { vervangAangifteStaatTx } from './aangiftestaat-opslag'
 import { schoonStaat, type AangifteStaat } from './aangiftestaat'
 import { schoonAccountantRegels, type AccountantRegels } from './accountant'
@@ -177,9 +179,12 @@ export function herstelpuntTot(aangemaakt: Date): string {
 
 const grens = (nu: Date) => new Date(nu.getTime() - HERSTELPUNT_BEWAARDAGEN * DAG_MS)
 
-/** Ruimt herstelpunten op die ouder zijn dan HERSTELPUNT_BEWAARDAGEN dagen (van alle huishoudens). */
-async function ruimOp(tx: Pick<DbTx, 'delete'>, nu: Date): Promise<void> {
-  await tx.delete(herstelpunten).where(lt(herstelpunten.aangemaakt, grens(nu)))
+/**
+ * Ruimt herstelpunten op die ouder zijn dan HERSTELPUNT_BEWAARDAGEN dagen (van alle huishoudens). Eén DELETE; de
+ * vergelijking is op ISO-tekst in UTC, die net zo sorteert als de tijd zelf.
+ */
+function ruimOp(q: Db | Tx, nu: Date): void {
+  q.delete(herstelpunten).where(lt(herstelpunten.aangemaakt, grens(nu))).run()
 }
 
 /**
@@ -193,7 +198,7 @@ export async function ruimVerlopenHerstelpuntenOp(opties: { nu?: Date; afEnToe?:
   const nu = opties.nu ?? new Date()
   if (opties.afEnToe && nu.getTime() - laatsteOpruiming < OPRUIM_INTERVAL_MS) return
   laatsteOpruiming = nu.getTime()
-  await ruimOp(getDb(), nu)
+  ruimOp(getDb(), nu)
 }
 
 /**
@@ -204,12 +209,13 @@ export async function ruimVerlopenHerstelpuntenOp(opties: { nu?: Date; afEnToe?:
 export async function actiefHerstelpunt(householdId: number, opties: { nu?: Date } = {}): Promise<ActiefHerstelpunt | null> {
   const nu = opties.nu ?? new Date()
   await ruimVerlopenHerstelpuntenOp({ nu })
-  const [rij] = await getDb()
+  const rij = getDb()
     .select()
     .from(herstelpunten)
     .where(and(eq(herstelpunten.householdId, householdId), eq(herstelpunten.reden, 'json-import'), gte(herstelpunten.aangemaakt, grens(nu))))
-    .orderBy(desc(herstelpunten.aangemaakt))
+    .orderBy(desc(herstelpunten.aangemaakt), desc(herstelpunten.id))
     .limit(1)
+    .get()
   if (!rij) return null
   let punt: ImportHerstelpunt
   try {
@@ -253,32 +259,36 @@ export function importMelding(jaar: number, actie: 'toevoegen' | 'vervangen', ui
   return basis
 }
 
-async function jaarRijTx(tx: DbTx, householdId: number, jaar: number) {
-  const [rij] = await tx
-    .select()
-    .from(dossierYears)
-    .where(and(eq(dossierYears.householdId, householdId), eq(dossierYears.jaar, jaar)))
-    .for('update')
-    .limit(1)
-  return rij ?? null
+function jaarRijTx(tx: Tx, householdId: number, jaar: number) {
+  return (
+    tx
+      .select()
+      .from(dossierYears)
+      .where(and(eq(dossierYears.householdId, householdId), eq(dossierYears.jaar, jaar)))
+      .limit(1)
+      .get() ?? null
+  )
 }
 
-/** Voert de import uit in één transactie. Gooit ImportFout bij een jaar dat niet (meer) kan; dan verandert er niets. */
+/**
+ * Voert de import uit in één schrijf(). Gooit ImportFout bij een jaar dat niet (meer) kan; dan rolt alles terug en
+ * verandert er niets, ook geen herstelpunt.
+ */
 export async function importeerJson(ctx: ImportContext, verzoek: GeldigeImport, opties: { nu?: Date } = {}): Promise<JsonImportResultaat> {
   const nu = opties.nu ?? new Date()
-  return getDb().transaction(async (tx) => {
-    // Eén import tegelijk per huishouden.
-    const [hh] = await tx.select().from(households).where(and(eq(households.id, ctx.householdId), eq(households.userId, ctx.userId))).for('update').limit(1)
+  return schrijf((tx) => {
+    // De schrijflock van schrijf() zorgt voor één import tegelijk; hier alleen controleren dat het huishouden van jou is.
+    const hh = tx.select().from(households).where(and(eq(households.id, ctx.householdId), eq(households.userId, ctx.userId))).limit(1).get()
     if (!hh) throw new ImportFout(404, 'Er is geen huishouden gevonden.')
-    await ruimOp(tx, nu)
-    await tx.delete(herstelpunten).where(and(eq(herstelpunten.householdId, ctx.householdId), eq(herstelpunten.reden, 'json-import')))
+    ruimOp(tx, nu)
+    tx.delete(herstelpunten).where(and(eq(herstelpunten.householdId, ctx.householdId), eq(herstelpunten.reden, 'json-import'))).run()
 
     const punt: ImportHerstelpunt = { reden: 'json-import', jaren: [] }
     const ingediend: NonNullable<ImportHerstelpunt['ingediend']> = []
     const resultaat: JsonImportResultaat = { toegevoegd: [], vervangen: [], overgeslagen: [], herstelpuntId: null, herstelpuntTot: null, meldingen: [] }
 
     for (const j of verzoek.jaren) {
-      const rij = await jaarRijTx(tx, ctx.householdId, j.jaar)
+      const rij = jaarRijTx(tx, ctx.householdId, j.jaar)
       if (j.actie === 'toevoegen' && rij) throw new ImportFout(409, `${j.jaar} staat al in je dossier. Kies Vervangen of Overslaan.`)
       if (j.actie === 'vervangen' && !rij) throw new ImportFout(409, `${j.jaar} staat niet (meer) in je dossier. Kies Toevoegen.`)
       // Ingediend is een feit: een jaar dat in het dossier al Ingediend was, blijft dat (ingediend_op blijft staan en
@@ -286,8 +296,8 @@ export async function importeerJson(ctx: ImportContext, verzoek: GeldigeImport, 
       const status = statusNaImport(j.status, rij?.status)
       let versieNaImport: number
       if (rij) {
-        const [doc] = await tx.select().from(accountantDocs).where(eq(accountantDocs.dossierYearId, rij.id)).limit(1)
-        const [staat] = await tx.select().from(aangifteStaat).where(eq(aangifteStaat.dossierYearId, rij.id)).limit(1)
+        const doc = tx.select().from(accountantDocs).where(eq(accountantDocs.dossierYearId, rij.id)).limit(1).get()
+        const staat = tx.select().from(aangifteStaat).where(eq(aangifteStaat.dossierYearId, rij.id)).limit(1).get()
         punt.jaren.push({
           jaar: j.jaar,
           vorige: {
@@ -300,34 +310,36 @@ export async function importeerJson(ctx: ImportContext, verzoek: GeldigeImport, 
           versieNaImport: 0,
         })
         if (rij.status === 'ingediend' && rij.ingediendOp) ingediend.push({ jaar: j.jaar, op: rij.ingediendOp.toISOString(), gewijzigdNa: rij.gewijzigdNaIndienen })
-        const uit = await bewaarJaarTx(tx, ctx.householdId, j.jaar, { invoer: j.invoer, status, variant: j.variant })
+        const uit = bewaarJaarTx(tx, ctx.householdId, j.jaar, { invoer: j.invoer, status, variant: j.variant })
         if (!uit) throw new ImportFout(409, `${j.jaar} staat niet (meer) in je dossier. Kies Toevoegen.`)
         versieNaImport = uit.overzicht.versie
         resultaat.vervangen.push(j.jaar)
       } else {
         punt.jaren.push({ jaar: j.jaar, vorige: null, versieNaImport: 0 })
-        versieNaImport = (await maakJaarTx(tx, ctx.householdId, j.invoer, { status })).versie
+        versieNaImport = maakJaarTx(tx, ctx.householdId, j.invoer, { status }).versie
         resultaat.toegevoegd.push(j.jaar)
       }
       punt.jaren[punt.jaren.length - 1].versieNaImport = versieNaImport
-      if (j.accountant) await bewaarAccountantTx(tx, ctx.householdId, j.jaar, j.accountant)
-      if (j.aangiftestaat) await vervangAangifteStaatTx(tx, ctx.householdId, j.jaar, j.aangiftestaat)
+      if (j.accountant) bewaarAccountantTx(tx, ctx.householdId, j.jaar, j.accountant)
+      if (j.aangiftestaat) vervangAangifteStaatTx(tx, ctx.householdId, j.jaar, j.aangiftestaat)
       resultaat.meldingen.push(importMelding(j.jaar, j.actie, j.status, rij?.status ?? null))
     }
 
     if (verzoek.gegevens) {
       punt.gegevens = { vorige: gegevensUitOpslag(ontsleutel<unknown>(hh.gegevensEnc, aad.huishouden(ctx.userId))) }
-      await tx.update(households).set({ gegevensEnc: versleutel(verzoek.gegevens, aad.huishouden(ctx.userId)), updatedAt: nu }).where(eq(households.id, ctx.householdId))
+      tx.update(households).set({ gegevensEnc: versleutel(verzoek.gegevens, aad.huishouden(ctx.userId)), updatedAt: nu }).where(eq(households.id, ctx.householdId)).run()
       resultaat.meldingen.push('Je persoonlijke gegevens zijn vervangen door die uit het bestand.')
     }
     if (ingediend.length > 0) punt.ingediend = ingediend
 
     if (punt.jaren.length > 0 || punt.gegevens) {
       const sleutel = randomBytes(16).toString('hex')
-      const [rij] = await tx
+      const rij = tx
         .insert(herstelpunten)
         .values({ householdId: ctx.householdId, sleutel, reden: 'json-import', inhoudEnc: versleutel(punt, aad.herstelpunt(ctx.householdId, sleutel)), aangemaakt: nu })
         .returning({ id: herstelpunten.id })
+        .get()
+      if (!rij) throw new ImportFout(500, 'Het herstelpunt is niet bewaard; er is niets geïmporteerd.')
       resultaat.herstelpuntId = rij.id
       resultaat.herstelpuntTot = herstelpuntTot(nu)
     }
@@ -339,13 +351,13 @@ export async function importeerJson(ctx: ImportContext, verzoek: GeldigeImport, 
 // Herstellen
 // ---------------------------------------------------------------------------
 
-async function laadPunt(tx: DbTx, ctx: ImportContext, id: number) {
-  const [rij] = await tx
+function laadPunt(tx: Tx, ctx: ImportContext, id: number) {
+  const rij = tx
     .select()
     .from(herstelpunten)
     .where(and(eq(herstelpunten.id, id), eq(herstelpunten.householdId, ctx.householdId), eq(herstelpunten.reden, 'json-import')))
-    .for('update')
     .limit(1)
+    .get()
   if (!rij) return null
   return { rij, punt: ontsleutel<ImportHerstelpunt>(rij.inhoudEnc, aad.herstelpunt(ctx.householdId, rij.sleutel)) }
 }
@@ -353,17 +365,19 @@ async function laadPunt(tx: DbTx, ctx: ImportContext, id: number) {
 /** Het voorstel: per jaar terugzetten of verwijderen, en of het jaar na de import nog is opgeslagen. Null zonder herstelpunt. */
 export async function herstelVoorstel(ctx: ImportContext, id: number, opties: { nu?: Date } = {}): Promise<HerstelVoorstel | null> {
   const nu = opties.nu ?? new Date()
-  return getDb().transaction(async (tx) => {
-    await ruimOp(tx, nu)
-    const p = await laadPunt(tx, ctx, id)
+  // schrijf(), omdat het eerst verlopen herstelpunten opruimt.
+  return schrijf((tx) => {
+    ruimOp(tx, nu)
+    const p = laadPunt(tx, ctx, id)
     if (!p) return null
     const jaren: HerstelVoorstel['jaren'] = []
     for (const j of p.punt.jaren) {
-      const [rij] = await tx
+      const rij = tx
         .select({ versie: dossierYears.versie })
         .from(dossierYears)
         .where(and(eq(dossierYears.householdId, ctx.householdId), eq(dossierYears.jaar, j.jaar)))
         .limit(1)
+        .get()
       jaren.push({ jaar: j.jaar, actie: j.vorige ? 'terugzetten' : 'verwijderen', gewijzigdNaImport: !rij || rij.versie !== j.versieNaImport })
     }
     return { herstelpuntId: p.rij.id, jaren, tot: herstelpuntTot(p.rij.aangemaakt) }
@@ -376,15 +390,15 @@ export async function herstelVoorstel(ctx: ImportContext, id: number, opties: { 
  */
 export async function herstelImport(ctx: ImportContext, id: number, opties: { nu?: Date } = {}): Promise<HerstelResultaat | null> {
   const nu = opties.nu ?? new Date()
-  return getDb().transaction(async (tx) => {
-    await ruimOp(tx, nu)
-    const p = await laadPunt(tx, ctx, id)
+  return schrijf((tx) => {
+    ruimOp(tx, nu)
+    const p = laadPunt(tx, ctx, id)
     if (!p) return null
     const uit: HerstelResultaat = { teruggezet: [], verwijderd: [], meldingen: [] }
     for (const j of p.punt.jaren) {
-      const rij = await jaarRijTx(tx, ctx.householdId, j.jaar)
+      const rij = jaarRijTx(tx, ctx.householdId, j.jaar)
       if (!j.vorige) {
-        if (rij) await tx.delete(dossierYears).where(eq(dossierYears.id, rij.id))
+        if (rij) tx.delete(dossierYears).where(eq(dossierYears.id, rij.id)).run()
         uit.verwijderd.push(j.jaar)
         continue
       }
@@ -392,23 +406,23 @@ export async function herstelImport(ctx: ImportContext, id: number, opties: { nu
       const invoer: HuishoudenInvoer = { ...v.invoer }
       if (v.variant) invoer.variant = v.variant
       else delete invoer.variant
-      if (rij) await bewaarJaarTx(tx, ctx.householdId, j.jaar, { invoer, status: v.status, variant: v.variant })
-      else await maakJaarTx(tx, ctx.householdId, invoer, { status: v.status })
-      const na = await jaarRijTx(tx, ctx.householdId, j.jaar)
+      if (rij) bewaarJaarTx(tx, ctx.householdId, j.jaar, { invoer, status: v.status, variant: v.variant })
+      else maakJaarTx(tx, ctx.householdId, invoer, { status: v.status })
+      const na = jaarRijTx(tx, ctx.householdId, j.jaar)
       if (!na) throw new ImportFout(500, 'Herstellen is niet gelukt.')
       const was = p.punt.ingediend?.find((x) => x.jaar === j.jaar)
-      if (v.status === 'ingediend' && was) await tx.update(dossierYears).set({ ingediendOp: new Date(was.op), gewijzigdNaIndienen: was.gewijzigdNa }).where(eq(dossierYears.id, na.id))
+      if (v.status === 'ingediend' && was) tx.update(dossierYears).set({ ingediendOp: new Date(was.op), gewijzigdNaIndienen: was.gewijzigdNa }).where(eq(dossierYears.id, na.id)).run()
       if (v.accountant) {
         const a = schoonAccountantRegels(v.accountant)
-        if ('regels' in a) await bewaarAccountantTx(tx, ctx.householdId, j.jaar, a.regels)
-      } else await tx.delete(accountantDocs).where(eq(accountantDocs.dossierYearId, na.id))
-      await vervangAangifteStaatTx(tx, ctx.householdId, j.jaar, v.aangiftestaat ?? null)
+        if ('regels' in a) bewaarAccountantTx(tx, ctx.householdId, j.jaar, a.regels)
+      } else tx.delete(accountantDocs).where(eq(accountantDocs.dossierYearId, na.id)).run()
+      vervangAangifteStaatTx(tx, ctx.householdId, j.jaar, v.aangiftestaat ?? null)
       uit.teruggezet.push(j.jaar)
     }
     if (p.punt.gegevens) {
-      await tx.update(households).set({ gegevensEnc: versleutel(gegevensUitOpslag(p.punt.gegevens.vorige), aad.huishouden(ctx.userId)), updatedAt: nu }).where(eq(households.id, ctx.householdId))
+      tx.update(households).set({ gegevensEnc: versleutel(gegevensUitOpslag(p.punt.gegevens.vorige), aad.huishouden(ctx.userId)), updatedAt: nu }).where(eq(households.id, ctx.householdId)).run()
     }
-    await tx.delete(herstelpunten).where(eq(herstelpunten.id, p.rij.id))
+    tx.delete(herstelpunten).where(eq(herstelpunten.id, p.rij.id)).run()
     const lijst = (jaren: number[]) => (jaren.length <= 1 ? jaren.join('') : `${jaren.slice(0, -1).join(', ')} en ${jaren[jaren.length - 1]}`)
     if (uit.verwijderd.length > 0) uit.meldingen.push(`${lijst(uit.verwijderd)} ${uit.verwijderd.length === 1 ? 'is' : 'zijn'} weer uit je dossier gehaald.`)
     if (uit.teruggezet.length > 0) uit.meldingen.push(`${lijst(uit.teruggezet)} ${uit.teruggezet.length === 1 ? 'staat' : 'staan'} weer zoals vóór de import.`)
@@ -419,6 +433,5 @@ export async function herstelImport(ctx: ImportContext, id: number, opties: { nu
 
 /** Alleen voor tests: het aantal herstelpunten van een huishouden. */
 export async function telHerstelpunten(householdId: number): Promise<number> {
-  const [r] = await getDb().select({ n: sql<number>`count(*)::int` }).from(herstelpunten).where(eq(herstelpunten.householdId, householdId))
-  return r?.n ?? 0
+  return getDb().select({ n: count() }).from(herstelpunten).where(eq(herstelpunten.householdId, householdId)).get()?.n ?? 0
 }

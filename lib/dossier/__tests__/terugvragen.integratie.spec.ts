@@ -1,21 +1,12 @@
 /**
  * Ronde 2 (A5): de kaart "Bronbelasting terugvragen" op het overzicht leest per jaar de opgeslagen invoer en de
- * terugvraagstatus uit de aangiftestaat (lib/dossier/terugvragen-opslag.ts), tegen een echte Postgres. Draait alleen
- * met IB_TEST_DATABASE_URL, in een eigen schema dat aan het eind wordt verwijderd.
+ * terugvraagstatus uit de aangiftestaat (lib/dossier/terugvragen-opslag.ts), op een echt SQLite-bestand per test
+ * (lib/db/testdb.ts).
  */
 import { randomBytes } from 'node:crypto'
-import { Client } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { gebruikTijdelijkeDb } from '@/lib/db/testdb'
 import type { HuishoudenInvoer, VermogensPositie } from '@/lib/tax/types'
-
-const BASIS_URL = process.env.IB_TEST_DATABASE_URL?.trim()
-const SCHEMA = `ib_test_a5_${Date.now()}_${randomBytes(3).toString('hex')}`
-
-function metSchema(url: string): string {
-  const u = new URL(url)
-  u.searchParams.set('options', `-c search_path=${SCHEMA}`)
-  return u.toString()
-}
 
 const degiro = (bronbelastingen: VermogensPositie['bronbelastingen']): VermogensPositie => ({
   id: 'degiro',
@@ -35,29 +26,16 @@ const invoer = (jaar: number, posities: VermogensPositie[]): HuishoudenInvoer =>
   verdeling: { eigenWoning: 1, pga: 1, box3: 1, box2: 1, dividendbelasting: 1 },
 })
 
-describe.skipIf(!BASIS_URL)('terugvragen over de jaren op een echte database', () => {
-  let url = ''
-  let beheer: Client
-
-  beforeAll(async () => {
-    url = metSchema(BASIS_URL!)
-    beheer = new Client({ connectionString: BASIS_URL })
-    await beheer.connect()
-    await beheer.query(`CREATE SCHEMA ${SCHEMA}`)
-    process.env.DATABASE_URL = url
+describe('terugvragen over de jaren op een echte database', () => {
+  const vorigeSleutel = process.env.DOSSIER_KEY
+  beforeAll(() => {
     process.env.DOSSIER_KEY = randomBytes(32).toString('base64')
-    delete (globalThis as Record<string, unknown>).__ibDb
-    const { migreer } = await import('@/scripts/migrate')
-    await migreer(url, undefined, () => undefined)
   })
-
-  afterAll(async () => {
-    const { getPool } = await import('@/lib/db')
-    await getPool().end().catch(() => undefined)
-    delete (globalThis as Record<string, unknown>).__ibDb
-    await beheer.query(`DROP SCHEMA IF EXISTS ${SCHEMA} CASCADE`)
-    await beheer.end()
+  afterAll(() => {
+    if (vorigeSleutel === undefined) delete process.env.DOSSIER_KEY
+    else process.env.DOSSIER_KEY = vorigeSleutel
   })
+  gebruikTijdelijkeDb()
 
   it('telt open verzoeken van alle jaren, laat Aangevraagd en kleine bedragen weg', async () => {
     const opslag = await import('@/lib/dossier/opslag')
@@ -65,7 +43,7 @@ describe.skipIf(!BASIS_URL)('terugvragen over de jaren op een echte database', (
     const { laadTerugvragen } = await import('@/lib/dossier/terugvragen-opslag')
     const { getDb } = await import('@/lib/db')
     const schema = await import('@/lib/db/schema')
-    const [u] = await getDb().insert(schema.users).values({ email: 'a5@example.nl', passwordHash: 'x', totpEnabled: true }).returning()
+    const u = getDb().insert(schema.users).values({ email: 'a5@example.nl', passwordHash: 'x', totpEnabled: true }).returning().get()!
     const h = await opslag.huishoudenVan(u.id)
 
     expect(await laadTerugvragen(h, '2026-10-05')).toBeNull()

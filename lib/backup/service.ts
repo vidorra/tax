@@ -1,5 +1,6 @@
 /**
- * Back-up van de database: configuratie uit de omgeving, dump, versleutelen, mailen en de run vastleggen.
+ * Back-up van de database: configuratie uit de omgeving, snapshot van het SQLite-bestand, versleutelen, mailen en
+ * de run vastleggen.
  *
  *  - geplandeTik: elke tik van de scheduler (scheduler.ts). Doet alleen iets als het moment van 1 februari
  *    of 1 augustus nog binnen de inhaaltermijn ligt en de periode te claimen is (runs.ts).
@@ -10,15 +11,17 @@
  * de tabel backups en in de log zijn kort en geheimvrij.
  */
 import { DossierSleutelFout, dossierSleutel, sleutelGeldig } from '@/lib/crypto'
-import { getPool } from '@/lib/db'
+import { dbFoutSoort, getSqlite } from '@/lib/db'
+import { databasemapSchrijfbaar, dbPad } from '@/lib/db/pad'
 import { ruimVerlopenHerstelpuntenOp } from '@/lib/dossier/import-opslag'
 import { geldigAdres, maskeerAdres, maskeerFout, ontbrekendeMailVariabelen, verstuurMail } from '@/lib/mail'
 
-import { HerstelFout, maakDump, telRijen } from './dump'
 import { BackupFout, bestandsnaam, sha256Hex, sleutelId, versleutelBackup } from './formaat'
+import { HerstelFout } from './herstel'
 import { actueelMoment, amsterdamDatum, BACKUP_MOMENTEN, datumNLLang, volgendMoment } from './planning'
 import { claimGepland, gedanePeriodes, laatsteGeslaagd, laatsteRun, markeerAfgebroken, rondAf, startHandmatig } from './runs'
-import type { BackupConfig, BackupInhoud, BackupResultaat, BackupSoort, BackupStatusPubliek, RijTelling } from './types'
+import { maakSnapshot, SnapshotFout } from './snapshot'
+import type { BackupConfig, BackupResultaat, BackupSoort, BackupStatusPubliek, RijTelling } from './types'
 import { formatGrootte, momentenNL, tijdstipNL } from './weergave'
 
 type Omgeving = Record<string, string | undefined>
@@ -28,13 +31,17 @@ export const MAX_MAIL_BYTES = 20 * 1024 * 1024
 
 const BIJLAGE_TYPE = 'application/octet-stream'
 
+/** Melding in `ontbreekt` als de map van het databasebestand niet schrijfbaar is. */
+export const DATABASE_ONTBREEKT = 'DATABASE_PATH (map niet schrijfbaar)'
+
 /**
- * Wat er nodig is om een back-up te maken én te mailen: DATABASE_URL, een geldige DOSSIER_KEY, een geldig
- * adres in BACKUP_MAIL_TO en een complete mailer (Resend of SMTP, zie lib/mail).
+ * Wat er nodig is om een back-up te maken én te mailen: een schrijfbare plek voor het databasebestand
+ * (DATABASE_PATH), een geldige DOSSIER_KEY, een geldig adres in BACKUP_MAIL_TO en een complete mailer (Resend of
+ * SMTP, zie lib/mail). `schrijfbaar` is te vervangen in tests.
  */
-export function backupConfig(env: Omgeving = process.env): BackupConfig {
+export function backupConfig(env: Omgeving = process.env, schrijfbaar: (pad: string) => boolean = databasemapSchrijfbaar): BackupConfig {
   const ontbreekt: string[] = []
-  if (!env.DATABASE_URL?.trim()) ontbreekt.push('DATABASE_URL')
+  if (!schrijfbaar(dbPad(env))) ontbreekt.push(DATABASE_ONTBREEKT)
   // Expliciet een tekst meegeven: bij undefined valt sleutelGeldig terug op process.env.
   if (!env.DOSSIER_KEY?.trim()) ontbreekt.push('DOSSIER_KEY')
   else if (!sleutelGeldig(env.DOSSIER_KEY)) ontbreekt.push('DOSSIER_KEY (ongeldig: 32 bytes als base64)')
@@ -73,30 +80,25 @@ function gitShaUit(env: Omgeving): string | null {
 }
 
 /**
- * Volledige dump van DATABASE_URL, versleuteld met een sleutel afgeleid van DOSSIER_KEY. Gooit bij een fout. Ruimt eerst
- * verlopen herstelpunten van de JSON-import op: die horen na 30 dagen niet meer in een back-up. Lukt dat niet, dan gaat
- * de back-up toch door.
+ * Volledige back-up van het databasebestand (snapshot.ts), versleuteld met een sleutel afgeleid van DOSSIER_KEY.
+ * Gooit bij een fout. Ruimt eerst verlopen herstelpunten van de JSON-import op: die horen na 30 dagen niet meer in
+ * een back-up. Lukt dat niet, dan gaat de back-up toch door.
  */
 export async function maakBackupBestand(soort: BackupSoort): Promise<BackupBestand> {
   const sleutel = dossierSleutel(process.env.DOSSIER_KEY ?? '')
-  await ruimVerlopenHerstelpuntenOp().catch(() => undefined)
-  const client = await getPool().connect()
-  let inhoud: BackupInhoud
   try {
-    inhoud = await maakDump(client, { gitSha: gitShaUit(process.env) })
-  } catch (e) {
-    // Een verbinding met een fout gaat weg in plaats van terug in de pool.
-    client.release(e instanceof Error ? e : true)
-    throw e
+    await ruimVerlopenHerstelpuntenOp()
+  } catch {
+    // Opruimen is een extraatje; de back-up gaat door.
   }
-  client.release()
+  const inhoud = await maakSnapshot(getSqlite(), { gitSha: gitShaUit(process.env) })
   const bestand = versleutelBackup(inhoud, sleutel)
   return {
     bestand,
     bestandsnaam: bestandsnaam(new Date(inhoud.gemaaktOp), soort),
     bytes: bestand.length,
     sha256: sha256Hex(bestand),
-    rijen: telRijen(inhoud),
+    rijen: inhoud.rijen,
     gemaaktOp: inhoud.gemaaktOp,
     gitSha: inhoud.gitSha,
     migraties: inhoud.migraties,
@@ -104,25 +106,32 @@ export async function maakBackupBestand(soort: BackupSoort): Promise<BackupBesta
   }
 }
 
-/** Haalt geheimen uit een tekst: wachtwoorden in verbindings-URL's, DOSSIER_KEY, DATABASE_URL, mailgeheimen en mailadressen. */
+/** Haalt geheimen uit een tekst: wachtwoorden in URL's, DOSSIER_KEY, mailgeheimen en mailadressen. */
 function zonderGeheimen(tekst: string): string {
   let s = tekst.replace(/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/@]*@/gi, '$1***@')
-  for (const naam of ['DATABASE_URL', 'DOSSIER_KEY']) {
-    const v = process.env[naam]?.trim()
-    if (v && v.length >= 8) s = s.split(v).join('***')
-  }
+  const sleutel = process.env.DOSSIER_KEY?.trim()
+  if (sleutel && sleutel.length >= 8) s = s.split(sleutel).join('***')
   return maskeerFout(s)
+}
+
+const DB_MELDINGEN: Record<NonNullable<ReturnType<typeof dbFoutSoort>>, string> = {
+  'schema-ontbreekt': 'De databasetabellen bestaan nog niet of zijn verouderd. Voer npm run db:migrate uit.',
+  bezet: 'De database was te lang bezet, bijvoorbeeld door een herstel of een import. De volgende poging volgt vanzelf.',
+  'niet-bereikbaar': 'Het databasebestand is niet te openen of te schrijven. Controleer DATABASE_PATH, de rechten op de map en de vrije ruimte.',
+  uniek: 'Databasefout (unieke waarde).',
+  constraint: 'Databasefout (controle van een kolom).',
 }
 
 /** Korte, geheimvrije omschrijving van een fout, voor de tabel backups, de log en de browser. */
 function veiligeFout(e: unknown): string {
   if (e instanceof DossierSleutelFout) return 'DOSSIER_KEY ontbreekt of is ongeldig.'
-  if (e instanceof BackupFout || e instanceof HerstelFout) return zonderGeheimen(e.message)
-  if (e instanceof RangeError && /string length/i.test(e.message)) return 'De database is te groot om in één keer als back-up te maken.'
+  if (e instanceof BackupFout || e instanceof HerstelFout || e instanceof SnapshotFout) return zonderGeheimen(e.message)
+  const soort = dbFoutSoort(e)
+  if (soort) return DB_MELDINGEN[soort]
   const code = (e as { code?: unknown } | null)?.code
-  // SQLSTATE: alleen de code, want een melding van Postgres kan in theorie een waarde bevatten.
-  if (typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code)) return `Databasefout (code ${code}).`
-  if (typeof code === 'string' && /^E[A-Z]+$/.test(code)) return `De database is niet bereikbaar (${code}).`
+  // Andere fouten van SQLite: alleen de code, want een melding kan in theorie een waarde bevatten.
+  if (typeof code === 'string' && /^SQLITE_[A-Z_]+$/.test(code)) return `Databasefout (${code}).`
+  if (typeof code === 'string' && /^E[A-Z]+$/.test(code)) return `Bestandsfout (${code}).`
   if (e instanceof Error) return zonderGeheimen(`${e.name}: ${e.message}`)
   return 'Onbekende fout.'
 }
@@ -179,13 +188,13 @@ function mailTekst(b: BackupBestand, soort: BackupSoort, nu: Date, moment: strin
     '',
     'Terugzetten',
     `1. Sla de bijlage op in de map van ibcalculator, bijvoorbeeld als ${pad}.`,
-    '2. Zet DATABASE_URL op de database waarin je wilt terugzetten en DOSSIER_KEY op dezelfde sleutel als nu.',
+    '2. Zet DOSSIER_KEY op dezelfde sleutel als nu. Het script zet de back-up terug in het databasebestand uit DATABASE_PATH (op de server /app/data/ibcalculator.db).',
     `3. Controleer het bestand: npm run backup -- bekijk ${pad}`,
-    `4. Zet het terug in een lege database: npm run backup -- herstel ${pad}`,
-    '   Het script maakt eerst de tabellen aan die bij de back-up horen. Wil je de gegevens in een bestaande database vervangen, voeg dan --overschrijf toe. De huidige gegevens in die database gaan dan verloren.',
-    '5. Start de app opnieuw en log in zoals je gewend bent.',
+    `4. Zet het terug: npm run backup -- herstel ${pad}`,
+    '   Is de database nog leeg, bijvoorbeeld net na een nieuwe installatie, dan gaat dat zonder meer. Staan er al gegevens in, voeg dan --overschrijf toe. De huidige gegevens gaan dan verloren.',
+    '5. Log daarna in met het account uit de back-up. Alle bestaande sessies zijn ingetrokken.',
     '',
-    'De stappen staan ook in de README, onder Back-up.',
+    'Op de server draai je hetzelfde script in de container. De stappen staan in de README, onder Back-up.',
     '',
     'Deze mail is automatisch verstuurd door ibcalculator. Er staan geen financiële gegevens in; die zitten alleen versleuteld in de bijlage.',
   ].join('\n')
@@ -278,7 +287,7 @@ export async function backupStatus(nu: Date = new Date()): Promise<BackupStatusP
     ontvanger: cfg.ontvanger ? maskeerAdres(cfg.ontvanger) : null,
     momenten: [...BACKUP_MOMENTEN],
   }
-  if (cfg.ontbreekt.includes('DATABASE_URL')) {
+  if (cfg.ontbreekt.includes(DATABASE_ONTBREEKT)) {
     return { ...basis, volgende: volgendMoment(nu, () => false), laatste: null, laatsteGeslaagd: null }
   }
   await markeerAfgebroken()

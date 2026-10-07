@@ -1,12 +1,13 @@
 /**
  * Gedeelde hulp voor de integratietests van de back-up: omgeving, nep-Resend, testgegevens met de
  * gevoelige velden van het echte schema, de inhoud van alle tabellen en het vangen van de log.
- * Geen spec-bestand, dus vitest draait dit niet los.
+ * Geen spec-bestand, dus vitest draait dit niet los. De database is die van lib/db/testdb.ts (DATABASE_PATH).
  */
-import type { Client } from 'pg'
 import { vi } from 'vitest'
 
 import { versleutel } from '@/lib/crypto'
+import { getDb, getSqlite, type Sqlite } from '@/lib/db'
+import { accountantDocs, dossierYears, households, koppelingen, snapshots, users } from '@/lib/db/schema'
 import { zetResendFetch } from '@/lib/mail'
 
 export const ONTVANGER = 'backup.ontvanger@example.nl'
@@ -15,18 +16,11 @@ export const GEBRUIKER_MAIL = 'eigenaar.dossier@example.nl'
 export const TOTP_GEHEIM = 'JBSWY3DPEHPK3PXPGEHEIM'
 export const MB_TOKEN = 'mb-token-0123456789abcdefGEHEIM'
 
-/** Tabellen van het dossier (alles behalve backups en _migrations). */
-export const TABELLEN = ['users', 'households', 'dossier_years', 'snapshots', 'accountant_docs', 'koppelingen', 'aangifte_staat', 'herstelpunten'] as const
+/** Tabellen van het dossier (alles behalve backups en _migrations), in de volgorde van de migratie. */
+export const TABELLEN = ['users', 'households', 'dossier_years', 'snapshots', 'accountant_docs', 'aangifte_staat', 'herstelpunten', 'koppelingen'] as const
 
-export function metSchema(basis: string, schema: string): string {
-  const u = new URL(basis)
-  u.searchParams.set('options', `-c search_path=${schema}`)
-  return u.toString()
-}
-
-/** Complete back-upconfiguratie met Resend; SMTP-variabelen weg. */
-export function zetBackupEnv(url: string, sleutel: string): void {
-  process.env.DATABASE_URL = url
+/** Complete back-upconfiguratie met Resend; SMTP-variabelen weg. DATABASE_PATH laat hij aan testdb.ts. */
+export function zetBackupEnv(sleutel: string): void {
   process.env.DOSSIER_KEY = sleutel
   process.env.BACKUP_MAIL_TO = ONTVANGER
   process.env.RESEND_API_KEY = RESEND_SLEUTEL
@@ -63,38 +57,45 @@ export function nepResend(): { verzoeken: ResendVerzoek[]; zetAntwoord(f: () => 
   }
 }
 
-/** Een account met huishouden, twee jaren, snapshot, accountantsregels en een koppeling. Vraagt DOSSIER_KEY in de omgeving. */
-export async function vulDatabase(db: Client): Promise<void> {
-  const u = await db.query<{ id: number }>(
-    `INSERT INTO users (email, password_hash, totp_secret, totp_enabled, sessie_generatie) VALUES ($1, $2, $3, true, 2) RETURNING id`,
-    [GEBRUIKER_MAIL, '$2a$12$abcdefghijklmnopqrstuuJ5c1Zr0g8nC2bq5yQwV0b8m3hS6d2e', TOTP_GEHEIM],
-  )
-  const hh = await db.query<{ id: number }>(`INSERT INTO households (user_id, naam, gegevens_enc) VALUES ($1, 'Huishouden "Noord"\n2e regel', $2) RETURNING id`, [
-    u.rows[0].id,
-    versleutel({ naam: 'Anna', iban: 'NL00TEST0123456789' }, 'households:1'),
-  ])
-  const hid = hh.rows[0].id
-  const jaren = await db.query<{ id: number }>(
-    `INSERT INTO dossier_years (household_id, jaar, variant, invoer_enc, status, versie)
-     VALUES ($1, 2025, NULL, $2, 'gecontroleerd', 3), ($1, 2026, 'brief-29-09', $3, 'concept', 1) RETURNING id`,
-    [hid, versleutel({ winst: 81234 }, `dossier_years:${hid}:2025`), versleutel({ winst: 90000 }, `dossier_years:${hid}:2026`)],
-  )
-  await db.query(`INSERT INTO snapshots (dossier_year_id, params_hash, uitkomst_enc) VALUES ($1, $2, $3)`, [jaren.rows[0].id, 'f'.repeat(64), versleutel({ ib: 12345 })])
-  await db.query(`INSERT INTO accountant_docs (dossier_year_id, regels_enc) VALUES ($1, $2)`, [jaren.rows[0].id, versleutel([{ regel: 'winst', bedrag: 81234 }])])
-  await db.query(`INSERT INTO koppelingen (household_id, label, token_enc, administratie_id, administratie_naam) VALUES ($1, 'Studio ☀️', $2, '100000000000000001', 'Studio Voorbeeld')`, [
-    hid,
-    versleutel(MB_TOKEN, 'koppelingen:1'),
-  ])
+/**
+ * Een account met huishouden, twee jaren, snapshot, accountantsregels en een koppeling, in de database van dit
+ * proces (getDb()). Vraagt DOSSIER_KEY in de omgeving. Geeft de id's terug.
+ */
+export function vulDatabase(email = GEBRUIKER_MAIL): { userId: number; householdId: number } {
+  const db = getDb()
+  const u = db
+    .insert(users)
+    .values({ email, passwordHash: '$2a$12$abcdefghijklmnopqrstuuJ5c1Zr0g8nC2bq5yQwV0b8m3hS6d2e', totpSecret: TOTP_GEHEIM, totpEnabled: true, sessieGeneratie: 2 })
+    .returning({ id: users.id })
+    .get()
+  const hid = db
+    .insert(households)
+    .values({ userId: u.id, naam: 'Huishouden "Noord"\n2e regel', gegevensEnc: versleutel({ naam: 'Anna', iban: 'NL00TEST0123456789' }, `households:${u.id}`) })
+    .returning({ id: households.id })
+    .get().id
+  const jaren = db
+    .insert(dossierYears)
+    .values([
+      { householdId: hid, jaar: 2025, variant: null, invoerEnc: versleutel({ winst: 81234 }, `dossier_years:${hid}:2025`), status: 'gecontroleerd', versie: 3 },
+      { householdId: hid, jaar: 2026, variant: 'brief-29-09', invoerEnc: versleutel({ winst: 90000 }, `dossier_years:${hid}:2026`), status: 'concept', versie: 1 },
+    ])
+    .returning({ id: dossierYears.id })
+    .all()
+  db.insert(snapshots).values({ dossierYearId: jaren[0].id, paramsHash: 'f'.repeat(64), uitkomstEnc: versleutel({ ib: 12345 }) }).run()
+  db.insert(accountantDocs).values({ dossierYearId: jaren[0].id, regelsEnc: versleutel([{ regel: 'winst', bedrag: 81234 }]) }).run()
+  db.insert(koppelingen)
+    .values({ householdId: hid, label: 'Studio ☀️', tokenEnc: versleutel(MB_TOKEN, `koppelingen:${hid}`), administratieId: '100000000000000001', administratieNaam: 'Studio Voorbeeld' })
+    .run()
+  return { userId: u.id, householdId: hid }
 }
 
-/** Alle rijen van de dossiertabellen als JSON, op id gesorteerd. */
-export async function tabelInhoud(db: Client, opties: { zonderSessie?: boolean } = {}): Promise<Record<string, unknown[]>> {
+/** Alle rijen van de dossiertabellen, op id gesorteerd, precies zoals SQLite ze teruggeeft. */
+export function tabelInhoud(sqlite: Sqlite = getSqlite(), opties: { zonderSessie?: boolean } = {}): Record<string, unknown[]> {
   const uit: Record<string, unknown[]> = {}
   for (const t of TABELLEN) {
+    const rijen = sqlite.prepare(`SELECT * FROM ${t} ORDER BY id`).all() as Array<Record<string, unknown>>
     // Na herstel is de sessiegeneratie bewust anders (alle sessies ingetrokken); die kolom kan worden weggelaten.
-    const expr = opties.zonderSessie && t === 'users' ? `to_jsonb(t) - 'sessie_generatie'` : 'to_jsonb(t)'
-    const { rows } = await db.query<{ r: unknown }>(`SELECT ${expr} AS r FROM ${t} t ORDER BY id`)
-    uit[t] = rows.map((x) => x.r)
+    uit[t] = opties.zonderSessie && t === 'users' ? rijen.map(({ sessie_generatie: _, ...rest }) => rest) : rijen
   }
   return uit
 }
@@ -114,3 +115,15 @@ export function vangLog(): { regels: string[]; herstel(): void } {
     },
   }
 }
+
+/** Zet de start van een run terug in de tijd, alsof hij `ms` eerder begon. */
+export function terug(id: number, ms: number): void {
+  const r = getSqlite().prepare('SELECT gestart_op AS g FROM backups WHERE id = ?').get(id) as { g: string }
+  getSqlite()
+    .prepare('UPDATE backups SET gestart_op = ? WHERE id = ?')
+    .run(new Date(new Date(r.g).getTime() - ms).toISOString(), id)
+}
+
+export const MINUUT = 60_000
+export const UUR = 60 * MINUUT
+export const DAG = 24 * UUR

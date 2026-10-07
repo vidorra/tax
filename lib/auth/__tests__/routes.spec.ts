@@ -3,6 +3,8 @@
  * cookie-store (next/headers) en een gebruiker in het geheugen in plaats van de database.
  */
 import { randomBytes } from 'node:crypto'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { voorbeeldInvoer } from '@/lib/voorbeeld'
 
@@ -68,11 +70,13 @@ const { clientIp, leesJson } = await import('@/lib/auth/api')
 const SECRET = 'test-geheim-van-minimaal-tweeendertig-tekens-lang'
 const TOTP_SECRET = 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP'
 const BASIS = 'https://ib.example.nl'
+/** Deze tests gebruiken geen database; DATABASE_PATH wijst naar een schrijfbare plek die nooit wordt geopend. */
+const GEEN_DB = join(tmpdir(), 'ib-test-geen-db', 'ibcalculator.db')
 
 let envKopie: NodeJS.ProcessEnv
 beforeEach(() => {
   envKopie = { ...process.env }
-  process.env.DATABASE_URL = 'postgres://niet-gebruikt'
+  process.env.DATABASE_PATH = GEEN_DB
   process.env.AUTH_SECRET = SECRET
   process.env.DOSSIER_KEY = randomBytes(32).toString('base64')
   delete process.env.TRUSTED_PROXY_HOPS

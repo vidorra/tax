@@ -3,13 +3,15 @@
  *
  * - Altijd: sessie (401), herkomst (403), niet ingericht (503), onbekend jaar (404) en een ontbrekende versie (400),
  *   zonder database.
- * - Met IB_TEST_DATABASE_URL (wegwerpcluster, zie db.integratie.spec.ts): voorbeeld zonder opslaan, 409 bij een
- *   oude versie, overnemen en opslaan, twee keer overnemen geeft hetzelfde zonder nieuwe versie, 404 zonder vorig
- *   jaar en geen toegang tot het dossier van een ander huishouden. Eigen schema per bestand.
+ * - Met een database (per test een eigen SQLite-bestand, zie lib/db/testdb.ts): voorbeeld zonder opslaan, 409 bij
+ *   een oude versie, overnemen en opslaan, twee keer overnemen geeft hetzelfde zonder nieuwe versie, 404 zonder vorig
+ *   jaar en geen toegang tot het dossier van een ander huishouden.
  */
 import { randomBytes } from 'node:crypto'
-import { Client } from 'pg'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { gebruikTijdelijkeDb } from '@/lib/db/testdb'
 import type { HuishoudenInvoer } from '@/lib/tax/types'
 
 const h = vi.hoisted(() => ({ echt: false }))
@@ -41,6 +43,9 @@ const { maakToken, SESSIE_COOKIE } = await import('@/lib/auth/sessie')
 const route = await import('@/app/api/dossier/jaren/[jaar]/doorrollen/route')
 
 const SECRET = 'test-geheim-van-minimaal-tweeendertig-tekens-lang'
+const SLEUTEL = randomBytes(32).toString('base64')
+/** Zonder database: een plek die schrijfbaar is maar nooit wordt geopend (en nooit ./data van de werkmap). */
+const GEEN_DB = join(tmpdir(), 'ib-test-geen-db', 'ibcalculator.db')
 
 function verzoek(methode: string, jaar: string, body?: unknown, headers: Record<string, string> = {}): [Request, { params: Promise<{ jaar: string }> }] {
   const req = new Request(`https://ib.example.nl/api/dossier/jaren/${jaar}/doorrollen/`, {
@@ -66,10 +71,8 @@ let envKopie: NodeJS.ProcessEnv
 beforeEach(() => {
   envKopie = { ...process.env }
   process.env.AUTH_SECRET = SECRET
-  if (!h.echt) {
-    process.env.DATABASE_URL = 'postgres://niet-gebruikt'
-    process.env.DOSSIER_KEY = randomBytes(32).toString('base64')
-  }
+  process.env.DOSSIER_KEY = SLEUTEL
+  process.env.DATABASE_PATH = GEEN_DB
   cookieStore.clear()
   gebruikers.clear()
 })
@@ -98,9 +101,6 @@ describe('route: controles vóór de database', () => {
     expect((await post('2026', { versie: 1 })).status).toBe(503)
   })
 })
-
-const BASIS_URL = process.env.IB_TEST_DATABASE_URL?.trim()
-const SCHEMA = `ib_doorrol_${Date.now()}_${randomBytes(3).toString('hex')}`
 
 function vorig2025(): HuishoudenInvoer {
   return {
@@ -132,45 +132,20 @@ function vorig2025(): HuishoudenInvoer {
   }
 }
 
-describe.skipIf(!BASIS_URL)('doorrollen op een echte database', () => {
-  let url = ''
-  let beheer: Client
-  let sleutel = ''
-  const dbEnv = () => {
-    process.env.DATABASE_URL = url
-    process.env.DOSSIER_KEY = sleutel
-  }
-
-  beforeAll(async () => {
-    const u = new URL(BASIS_URL!)
-    u.searchParams.set('options', `-c search_path=${SCHEMA}`)
-    url = u.toString()
-    sleutel = randomBytes(32).toString('base64')
-    beheer = new Client({ connectionString: BASIS_URL })
-    await beheer.connect()
-    await beheer.query(`CREATE SCHEMA ${SCHEMA}`)
-    delete (globalThis as Record<string, unknown>).__ibDb
+describe('doorrollen op een echte database', () => {
+  gebruikTijdelijkeDb()
+  beforeAll(() => {
     h.echt = true
-    dbEnv()
-    const { migreer } = await import('@/scripts/migrate')
-    await migreer(url, undefined, () => undefined)
   })
-  beforeEach(dbEnv)
-
-  afterAll(async () => {
+  afterAll(() => {
     h.echt = false
-    const { getPool } = await import('@/lib/db')
-    await getPool().end().catch(() => undefined)
-    delete (globalThis as Record<string, unknown>).__ibDb
-    await beheer.query(`DROP SCHEMA IF EXISTS ${SCHEMA} CASCADE`)
-    await beheer.end()
   })
 
   async function gebruikerMetHuishouden(email: string): Promise<{ userId: number; hh: number }> {
     const { getDb } = await import('@/lib/db')
     const { users } = await import('@/lib/db/schema')
     const { huishoudenVan } = await import('@/lib/dossier/opslag')
-    const [u] = await getDb().insert(users).values({ email, passwordHash: 'x', totpEnabled: true }).returning()
+    const u = getDb().insert(users).values({ email, passwordHash: 'x', totpEnabled: true }).returning().get()!
     return { userId: u.id, hh: await huishoudenVan(u.id) }
   }
 

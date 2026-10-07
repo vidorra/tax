@@ -3,6 +3,7 @@
  * 503 als het dossier niet is ingericht, 401 zonder geldige sessie. Nooit request bodies loggen.
  */
 import { NextResponse } from 'next/server'
+import { dbFoutSoort, type DbFoutSoort } from '@/lib/db'
 import { configStatus, NIET_GECONFIGUREERD_MELDING } from './config'
 import { getSessie, sessieNogGeldig } from './server'
 import { gebruikerOpId } from './gebruiker'
@@ -17,7 +18,7 @@ export function fout(status: number, melding: string, extra: Record<string, unkn
   return json({ fout: melding, ...extra }, status, headers)
 }
 
-/** 503 als DATABASE_URL, AUTH_SECRET of DOSSIER_KEY ontbreekt; anders null. */
+/** 503 als AUTH_SECRET of DOSSIER_KEY ontbreekt of de map van de database niet schrijfbaar is (DATABASE_PATH); anders null. */
 export function nietGeconfigureerd(): NextResponse | null {
   const s = configStatus()
   if (s.geconfigureerd) return null
@@ -128,16 +129,40 @@ export async function vereisGebruiker(): Promise<{ userId: number } | NextRespon
   return { userId: gebruiker.id }
 }
 
+/**
+ * Meldingen bij databasefouten die de gebruiker of de beheerder zelf kan oplossen. Een geschonden UNIQUE of CHECK is
+ * een fout in de app en krijgt de gewone melding.
+ */
+const DB_MELDINGEN: Partial<Record<DbFoutSoort, string>> = {
+  'schema-ontbreekt': 'De databasetabellen bestaan nog niet of zijn verouderd. Voer npm run db:migrate uit.',
+  'niet-bereikbaar': 'Het databasebestand is niet te openen of te schrijven. Controleer DATABASE_PATH en de rechten op de map.',
+  bezet: 'De database is even bezet, bijvoorbeeld door een back-up of herstel. Probeer het zo opnieuw.',
+}
+
+/** De melding bij een databasefout (zie DB_MELDINGEN), of null als het geen fout is die de gebruiker kan oplossen. */
+export function databaseFoutMelding(e: unknown): string | null {
+  const soort = dbFoutSoort(e)
+  return soort ? (DB_MELDINGEN[soort] ?? null) : null
+}
+
+/** Foutcode voor de log (bijvoorbeeld SQLITE_BUSY of EACCES), ook uit `cause`; nooit de melding zelf. */
+function foutCode(e: unknown): string | null {
+  let f: unknown = e
+  for (let i = 0; f && typeof f === 'object' && i < 5; i++, f = (f as { cause?: unknown }).cause) {
+    const code = (f as { code?: unknown }).code
+    if (typeof code === 'string' && /^[A-Z][A-Z0-9_]{1,40}$/.test(code)) return code
+  }
+  return null
+}
+
 /** Vangt onverwachte fouten zonder details of invoer te loggen. */
 export function serverFout(e: unknown, context: string): NextResponse {
   const naam = e instanceof Error ? e.name : 'onbekend'
-  // Drizzle verpakt databasefouten; de pg-code staat dan in `cause`.
-  const code = (e as { code?: string })?.code ?? (e as { cause?: { code?: string } })?.cause?.code
+  // Drizzle verpakt databasefouten; de code van SQLite staat dan in `cause`.
+  const code = foutCode(e)
   console.error(`[${context}] fout: ${naam}${code ? ` (${code})` : ''}`)
   if (naam === 'OntsleutelFout') return fout(500, 'De opgeslagen gegevens konden niet worden ontsleuteld. Controleer of DOSSIER_KEY dezelfde sleutel is als waarmee ze zijn opgeslagen.')
-  if (code === '42P01' || code === '42703') return fout(503, 'De databasetabellen bestaan nog niet of zijn verouderd. Voer npm run db:migrate uit.')
-  if (code === 'ECONNREFUSED' || code === 'ENOTFOUND' || code === '28P01' || code === '3D000') {
-    return fout(503, 'De database is niet bereikbaar. Controleer DATABASE_URL.')
-  }
+  const db = databaseFoutMelding(e)
+  if (db) return fout(503, db)
   return fout(500, 'Er ging iets mis op de server. Probeer het opnieuw.')
 }

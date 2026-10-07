@@ -1,19 +1,24 @@
 /**
  * Opslag en API-routes van de Moneybird-koppelingen.
  *
- * - Altijd: pure onderdelen (id's, token, label, bron in het dossier) en de route-controles die vóór de
- *   opslag gebeuren (sessie, herkomst, validatie).
- * - Met IB_TEST_DATABASE_URL (wegwerpcluster, zie lib/dossier/__tests__/db.integratie.spec.ts): de
- *   opslag op een echte Postgres in een eigen schema, en een end-to-end-test van alle routes met een
- *   nagebootste Moneybird.
+ * - Pure onderdelen (id's, token, label, bron in het dossier) en de route-controles die vóór de opslag
+ *   gebeuren (sessie, herkomst, validatie).
+ * - De opslag op een echt SQLite-bestand (per test een eigen, gemigreerd bestand via gebruikTijdelijkeDb):
+ *   versleuteling, het maximum en de indeling bij gelijktijdige verzoeken, de omgevingskoppeling, en een
+ *   end-to-end-test van alle routes met een nagebootste Moneybird.
  */
 import { randomBytes } from 'node:crypto'
-import { readdirSync } from 'node:fs'
-import { Client } from 'pg'
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { existsSync, readFileSync } from 'node:fs'
+import { and, count, eq } from 'drizzle-orm'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { getDb, getSqlite, openSqlite } from '@/lib/db'
+import { households, koppelingen, users } from '@/lib/db/schema'
+import { gebruikTijdelijkeDb } from '@/lib/db/testdb'
+import { OntsleutelFout, versleutel } from '@/lib/crypto'
 import { NEP_ADM, NEP_TOKEN, nepMoneybird } from './fixtures/nep'
 
-const h = vi.hoisted(() => ({ echt: false }))
+/** echt: de echte huishoudenVan (voor de samenwerking met het dossier); anders het huishouden uit `huishoudens`. */
+const h = vi.hoisted(() => ({ echt: false, huishoudens: new Map<number, number>() }))
 
 type Opties = { httpOnly?: boolean; path?: string; maxAge?: number }
 const cookieStore = new Map<string, { value: string; opties: Opties }>()
@@ -35,12 +40,14 @@ vi.mock('@/lib/auth/gebruiker', async (orig) => ({
 
 vi.mock('@/lib/dossier/opslag', async (orig) => {
   const echt = await orig<typeof import('@/lib/dossier/opslag')>()
-  return { ...echt, huishoudenVan: (userId: number) => (h.echt ? echt.huishoudenVan(userId) : Promise.resolve(userId * 10)) }
+  return { ...echt, huishoudenVan: (userId: number) => (h.echt ? echt.huishoudenVan(userId) : Promise.resolve(h.huishoudens.get(userId) ?? userId * 10)) }
 })
 
 const { maakToken, SESSIE_COOKIE } = await import('@/lib/auth/sessie')
 const { zetMoneybirdFetch } = await import('../client')
+const { MAX_INDELING_REGELS } = await import('../indeling')
 const opslag = await import('../opslag')
+const { aad } = await import('@/lib/dossier/opslag')
 const { valideerInvoer } = await import('@/lib/dossier/valideer')
 const routes = {
   lijst: await import('@/app/api/dossier/koppelingen/route'),
@@ -71,14 +78,13 @@ let envKopie: NodeJS.ProcessEnv
 beforeEach(() => {
   envKopie = { ...process.env }
   process.env.AUTH_SECRET = SECRET
-  if (!h.echt) {
-    process.env.DATABASE_URL = 'postgres://niet-gebruikt'
-    process.env.DOSSIER_KEY = randomBytes(32).toString('base64')
-  }
+  process.env.DOSSIER_KEY = randomBytes(32).toString('base64')
   delete process.env.MONEYBIRD_TOKEN
   delete process.env.MONEYBIRD_ADMINISTRATION_ID
   cookieStore.clear()
   gebruikers.clear()
+  h.echt = false
+  h.huishoudens.clear()
   const g = globalThis as Record<string, unknown>
   delete g.__ibMbImportLimiter
   delete g.__ibMbToevoegLimiter
@@ -87,6 +93,10 @@ afterEach(() => {
   process.env = envKopie
   zetMoneybirdFetch(null)
 })
+
+// Elke test een eigen, gemigreerd databasebestand; DATABASE_PATH wijst ernaar, dus configStatus is ook in
+// de routetests zonder opslag in orde.
+const testDb = gebruikTijdelijkeDb()
 
 describe('pure onderdelen', () => {
   it('id uit het pad', () => {
@@ -162,146 +172,267 @@ describe('routes: controles vóór de opslag', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Echte database
+// Opslag in een SQLite-bestand
 // ---------------------------------------------------------------------------
 
-const BASIS_URL = process.env.IB_TEST_DATABASE_URL?.trim()
-const SCHEMA = `ib_mb_${Date.now()}_${randomBytes(3).toString('hex')}`
+/** Gebruiker met een eigen huishouden, rechtstreeks in de database (de mock van huishoudenVan vindt het terug). */
+function gebruikerMetHuishouden(email: string): { userId: number; hh: number } {
+  const db = getDb()
+  const u = db.insert(users).values({ email, passwordHash: 'x', totpEnabled: true }).returning().get()
+  const hh = db.insert(households).values({ userId: u.id, gegevensEnc: versleutel({}, aad.huishouden(u.id)) }).returning().get()
+  h.huishoudens.set(u.id, hh.id)
+  return { userId: u.id, hh: hh.id }
+}
 
-describe.skipIf(!BASIS_URL)('koppelingen op een echte database', () => {
-  let url = ''
-  let beheer: Client
-  let sleutel = ''
-  const dbEnv = () => {
-    process.env.DATABASE_URL = url
-    process.env.DOSSIER_KEY = sleutel
-  }
+const rijVan = (id: string | number) => getDb().select().from(koppelingen).where(eq(koppelingen.id, Number(id))).get()
+const aantalRijen = (hh: number, soort?: string) =>
+  getDb()
+    .select({ n: count() })
+    .from(koppelingen)
+    .where(soort ? and(eq(koppelingen.householdId, hh), eq(koppelingen.soort, soort)) : eq(koppelingen.householdId, hh))
+    .get()!.n
 
-  beforeAll(async () => {
-    const u = new URL(BASIS_URL!)
-    u.searchParams.set('options', `-c search_path=${SCHEMA}`)
-    url = u.toString()
-    sleutel = randomBytes(32).toString('base64')
-    beheer = new Client({ connectionString: BASIS_URL })
-    await beheer.connect()
-    await beheer.query(`CREATE SCHEMA ${SCHEMA}`)
-    delete (globalThis as Record<string, unknown>).__ibDb
-    h.echt = true
-    const { migreer } = await import('@/scripts/migrate')
-    expect(await migreer(url, undefined, () => undefined)).toBe(readdirSync('migrations').filter((f) => f.endsWith('.sql')).length)
-    expect(await migreer(url, undefined, () => undefined)).toBe(0)
+/** Alle bytes van de database op schijf (bestand en WAL). */
+function bytesOpSchijf(): Buffer {
+  const delen = [testDb.pad, `${testDb.pad}-wal`].filter((p) => existsSync(p)).map((p) => readFileSync(p))
+  return Buffer.concat(delen)
+}
+
+/** Fetch die bij de eerste vraag naar de administraties eerst `tussendoor` uitvoert (een ander verzoek of proces). */
+function metTussendoor(tussendoor: () => void) {
+  const nep = nepMoneybird()
+  let gedaan = false
+  zetMoneybirdFetch(async (input, init) => {
+    if (!gedaan && String(input).includes('/administrations.json')) {
+      gedaan = true
+      tussendoor()
+    }
+    return nep.fetch(input, init)
   })
-  beforeEach(dbEnv)
+}
 
-  afterAll(async () => {
-    h.echt = false
-    const { getPool } = await import('@/lib/db')
-    await getPool().end().catch(() => undefined)
-    delete (globalThis as Record<string, unknown>).__ibDb
-    await beheer.query(`DROP SCHEMA IF EXISTS ${SCHEMA} CASCADE`)
-    await beheer.end()
-  })
-
-  async function gebruikerMetHuishouden(email: string): Promise<{ userId: number; hh: number }> {
-    dbEnv()
-    const { getDb } = await import('@/lib/db')
-    const { users } = await import('@/lib/db/schema')
-    const { huishoudenVan } = await import('@/lib/dossier/opslag')
-    const [u] = await getDb().insert(users).values({ email, passwordHash: 'x', totpEnabled: true }).returning()
-    return { userId: u.id, hh: await huishoudenVan(u.id) }
-  }
-
+describe('koppelingen in de database', () => {
   it('bewaart het token versleuteld, gebonden aan huishouden en rij', async () => {
-    const { getDb } = await import('@/lib/db')
-    const { koppelingen } = await import('@/lib/db/schema')
-    const { eq } = await import('drizzle-orm')
-    const { OntsleutelFout } = await import('@/lib/crypto')
     zetMoneybirdFetch(nepMoneybird().fetch)
-    const a = await gebruikerMetHuishouden('a@example.nl')
-    const b = await gebruikerMetHuishouden('b@example.nl')
+    const a = gebruikerMetHuishouden('a@example.nl')
+    const b = gebruikerMetHuishouden('b@example.nl')
 
     const { koppeling, administraties } = await opslag.maakKoppeling(a.hh, { token: NEP_TOKEN, label: 'Studio' })
     expect(administraties).toHaveLength(2)
-    expect(koppeling).toMatchObject({ label: 'Studio', bron: 'dossier', tokenMasker: '••••••abcd', administratieId: null })
-    const [rij] = await getDb().select().from(koppelingen).where(eq(koppelingen.id, Number(koppeling.id)))
+    expect(koppeling).toMatchObject({ label: 'Studio', bron: 'dossier', tokenMasker: '••••••abcd', administratieId: null, laatstGebruikt: null })
+    expect(new Date(koppeling.aangemaakt!).toISOString()).toBe(koppeling.aangemaakt)
+    const rij = rijVan(koppeling.id)!
     expect(rij.tokenEnc.startsWith('v2.')).toBe(true)
     expect(rij.tokenEnc).not.toContain(NEP_TOKEN)
     expect((await opslag.laadKoppeling(a.hh, Number(koppeling.id)))?.token).toBe(NEP_TOKEN)
+    // Het token staat nergens leesbaar in het bestand, ook niet tijdelijk in de WAL.
+    expect(bytesOpSchijf().includes(NEP_TOKEN)).toBe(false)
 
     // Ciphertext kopiëren naar een rij van een ander huishouden werkt niet.
     const { koppeling: kb } = await opslag.maakKoppeling(b.hh, { token: NEP_TOKEN, label: 'B' })
-    await getDb().update(koppelingen).set({ tokenEnc: rij.tokenEnc }).where(eq(koppelingen.id, Number(kb.id)))
+    getDb().update(koppelingen).set({ tokenEnc: rij.tokenEnc }).where(eq(koppelingen.id, Number(kb.id))).run()
     await expect(opslag.laadKoppeling(b.hh, Number(kb.id))).rejects.toBeInstanceOf(OntsleutelFout)
     expect((await opslag.lijstKoppelingen(b.hh))[0].tokenMasker).toBe('••••••')
 
     // Geen toegang tot de koppeling van een ander huishouden.
     expect(await opslag.laadKoppeling(b.hh, Number(koppeling.id))).toBeNull()
+    expect(await opslag.laadIndeling(b.hh, Number(koppeling.id))).toBeNull()
+    expect(await opslag.kiesAdministratie(b.hh, Number(koppeling.id), NEP_ADM, undefined)).toBeNull()
     expect(await opslag.verwijderKoppeling(b.hh, Number(koppeling.id))).toBe(false)
     expect(await opslag.bewaarIndeling(b.hh, Number(koppeling.id), { '1': 'kosten' })).toBeNull()
+    await opslag.raakAan(b.hh, Number(koppeling.id))
+    expect(rijVan(koppeling.id)?.laatstGebruikt).toBeNull()
 
     // Administratie kiezen: alleen een van het token.
     await expect(opslag.kiesAdministratie(a.hh, Number(koppeling.id), '999', undefined)).rejects.toMatchObject({ status: 422 })
     const gekozen = await opslag.kiesAdministratie(a.hh, Number(koppeling.id), NEP_ADM, 'Mijn studio')
     expect(gekozen).toMatchObject({ administratieId: NEP_ADM, administratieNaam: 'Studio Voorbeeld', label: 'Mijn studio' })
 
-    // Indeling versleuteld bewaren en terugladen.
-    await opslag.bewaarIndeling(a.hh, Number(koppeling.id), { '603': 'negeren' })
-    expect(await opslag.laadIndeling(a.hh, Number(koppeling.id))).toEqual({ '603': 'negeren' })
-    const [na] = await getDb().select().from(koppelingen).where(eq(koppelingen.id, Number(koppeling.id)))
+    // Indeling versleuteld bewaren en terugladen; een wijziging voegt samen, null wist.
+    await opslag.bewaarIndeling(a.hh, Number(koppeling.id), { '603': 'negeren', '604': 'kosten' })
+    expect(await opslag.bewaarIndeling(a.hh, Number(koppeling.id), { '604': null, '605': 'omzet' })).toEqual({ '603': 'negeren', '605': 'omzet' })
+    expect(await opslag.laadIndeling(a.hh, Number(koppeling.id))).toEqual({ '603': 'negeren', '605': 'omzet' })
+    const na = rijVan(koppeling.id)!
     expect(na.indelingEnc?.startsWith('v2.')).toBe(true)
     expect(na.indelingEnc).not.toContain('negeren')
+
+    // laatst_gebruikt als ISO-tekst in UTC in het bestand, als Date in de code.
+    await opslag.raakAan(a.hh, Number(koppeling.id))
+    const ruw = getSqlite().prepare('SELECT laatst_gebruikt AS t FROM koppelingen WHERE id = ?').get(Number(koppeling.id)) as { t: string }
+    expect(ruw.t).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/)
+    expect(rijVan(koppeling.id)?.laatstGebruikt).toBeInstanceOf(Date)
+  })
+
+  it('verwijderen haalt het versleutelde token ook uit het bestand', async () => {
+    zetMoneybirdFetch(nepMoneybird().fetch)
+    const { hh } = gebruikerMetHuishouden('weg@example.nl')
+    const { koppeling } = await opslag.maakKoppeling(hh, { token: NEP_TOKEN, label: 'Weg' })
+    const tokenEnc = rijVan(koppeling.id)!.tokenEnc
+    getSqlite().pragma('wal_checkpoint(TRUNCATE)')
+    expect(bytesOpSchijf().includes(tokenEnc)).toBe(true)
+    expect(await opslag.verwijderKoppeling(hh, Number(koppeling.id))).toBe(true)
+    expect(await opslag.verwijderKoppeling(hh, Number(koppeling.id))).toBe(false)
+    getSqlite().pragma('wal_checkpoint(TRUNCATE)')
+    expect(bytesOpSchijf().includes(tokenEnc)).toBe(false)
   })
 
   it('maximaal tien koppelingen, ook bij gelijktijdige verzoeken', async () => {
     zetMoneybirdFetch(nepMoneybird().fetch)
-    const { hh } = await gebruikerMetHuishouden('max@example.nl')
+    const { hh } = gebruikerMetHuishouden('max@example.nl')
     for (let i = 0; i < 8; i++) await opslag.maakKoppeling(hh, { token: NEP_TOKEN, label: `K${i}` })
     const r = await Promise.allSettled([1, 2, 3].map((i) => opslag.maakKoppeling(hh, { token: NEP_TOKEN, label: `P${i}` })))
     expect(r.filter((x) => x.status === 'fulfilled')).toHaveLength(2)
-    expect(r.find((x) => x.status === 'rejected')).toMatchObject({ reason: { status: 409 } })
+    const afgewezen = r.find((x) => x.status === 'rejected') as PromiseRejectedResult
+    expect(afgewezen.reason).toBeInstanceOf(opslag.KoppelingFout)
+    expect(afgewezen.reason).toMatchObject({ status: 409 })
     expect((await opslag.lijstKoppelingen(hh)).length).toBe(10)
+    // De afgewezen poging is volledig teruggedraaid: geen rij met de tijdelijke waarde.
+    expect(aantalRijen(hh)).toBe(10)
+    expect(getSqlite().prepare("SELECT count(*) AS n FROM koppelingen WHERE token_enc = 'tijdelijk'").get()).toEqual({ n: 0 })
   })
 
-  it('koppeling uit de omgeving: niet te verwijderen, indeling in een eigen rij, mee in export, weg met verwijder-alles', async () => {
+  it('telt koppelingen mee die een ander proces tijdens de controle bij Moneybird toevoegt', async () => {
+    const { hh } = gebruikerMetHuishouden('ander@example.nl')
+    metTussendoor(() => {
+      // Een tweede verbinding op hetzelfde bestand, zoals een ander proces: tien koppelingen in één transactie.
+      const ander = openSqlite(testDb.pad)
+      try {
+        const zet = ander.prepare("INSERT INTO koppelingen (household_id, soort, label, token_enc) VALUES (?, 'moneybird', ?, 'x')")
+        ander.transaction(() => {
+          for (let i = 0; i < 10; i++) zet.run(hh, `Ander ${i}`)
+        }).immediate()
+      } finally {
+        ander.close()
+      }
+    })
+    await expect(opslag.maakKoppeling(hh, { token: NEP_TOKEN, label: 'Te laat' })).rejects.toMatchObject({ status: 409 })
+    expect(aantalRijen(hh)).toBe(10)
+  })
+
+  it('administratie kiezen op een koppeling die tijdens de vraag aan Moneybird verdwijnt, geeft null', async () => {
+    zetMoneybirdFetch(nepMoneybird().fetch)
+    const { hh } = gebruikerMetHuishouden('verdwijnt@example.nl')
+    const { koppeling } = await opslag.maakKoppeling(hh, { token: NEP_TOKEN, label: 'Eerste' })
+    const id = Number(koppeling.id)
+    metTussendoor(() => {
+      getDb().delete(koppelingen).where(eq(koppelingen.id, id)).run()
+    })
+    expect(await opslag.kiesAdministratie(hh, id, NEP_ADM, 'Nieuw')).toBeNull()
+    // AUTOINCREMENT: een nieuwe koppeling krijgt nooit het id van de verwijderde.
+    zetMoneybirdFetch(nepMoneybird().fetch)
+    const { koppeling: tweede } = await opslag.maakKoppeling(hh, { token: NEP_TOKEN, label: 'Tweede' })
+    expect(Number(tweede.id)).toBeGreaterThan(id)
+  })
+
+  it('gelijktijdige wijzigingen van de indeling gaan allebei mee', async () => {
+    zetMoneybirdFetch(nepMoneybird().fetch)
+    const { hh } = gebruikerMetHuishouden('indeling@example.nl')
+    const { koppeling } = await opslag.maakKoppeling(hh, { token: NEP_TOKEN, label: 'Studio' })
+    const id = Number(koppeling.id)
+    await Promise.all([
+      opslag.bewaarIndeling(hh, id, { '601': 'kosten' }),
+      opslag.bewaarIndeling(hh, id, { '602': 'omzet' }),
+      opslag.bewaarIndeling(hh, id, { '603': 'negeren' }),
+    ])
+    expect(await opslag.laadIndeling(hh, id)).toEqual({ '601': 'kosten', '602': 'omzet', '603': 'negeren' })
+  })
+
+  it('te grote indeling: 422 en niets bewaard', async () => {
     zetMoneybirdFetch(nepMoneybird().fetch)
     process.env.MONEYBIRD_TOKEN = NEP_TOKEN
     process.env.MONEYBIRD_ADMINISTRATION_ID = NEP_ADM
-    const { userId, hh } = await gebruikerMetHuishouden('env@example.nl')
+    const { hh } = gebruikerMetHuishouden('groot@example.nl')
+    const { koppeling } = await opslag.maakKoppeling(hh, { token: NEP_TOKEN, label: 'Studio' })
+    const id = Number(koppeling.id)
+    await opslag.bewaarIndeling(hh, id, { '1': 'kosten' })
+    const teVeel = Object.fromEntries(Array.from({ length: MAX_INDELING_REGELS + 1 }, (_, i) => [String(1000 + i), 'kosten' as const]))
+    await expect(opslag.bewaarIndeling(hh, id, teVeel)).rejects.toMatchObject({ status: 422 })
+    expect(await opslag.laadIndeling(hh, id)).toEqual({ '1': 'kosten' })
+    // Ook geen nieuwe omgevingsrij als de eerste indeling van de omgevingskoppeling al te groot is.
+    await expect(opslag.bewaarIndeling(hh, 'env', teVeel)).rejects.toMatchObject({ status: 422 })
+    expect(aantalRijen(hh, 'moneybird-env')).toBe(0)
+  })
+
+  it('koppeling uit de omgeving: niet te verwijderen, indeling in één eigen rij, mee in de export, weg met het huishouden', async () => {
+    zetMoneybirdFetch(nepMoneybird().fetch)
+    const { hh } = gebruikerMetHuishouden('env@example.nl')
+    // Zonder MONEYBIRD_TOKEN bestaat 'env' niet.
+    expect(await opslag.laadKoppeling(hh, 'env')).toBeNull()
+    expect(await opslag.laadIndeling(hh, 'env')).toBeNull()
+    expect(await opslag.bewaarIndeling(hh, 'env', { '606': 'kosten' })).toBeNull()
+    expect(await opslag.kiesAdministratie(hh, 'env', NEP_ADM, undefined)).toBeNull()
+    await opslag.raakAan(hh, 'env')
+    expect(aantalRijen(hh)).toBe(0)
+
+    process.env.MONEYBIRD_TOKEN = NEP_TOKEN
+    process.env.MONEYBIRD_ADMINISTRATION_ID = NEP_ADM
     await opslag.maakKoppeling(hh, { token: NEP_TOKEN, label: 'Eigen' })
     const lijst = await opslag.lijstKoppelingen(hh)
     expect(lijst.map((k) => [k.id, k.bron])).toEqual([['env', 'env'], [expect.any(String), 'dossier']])
-    expect(lijst[0]).toMatchObject({ administratieId: NEP_ADM, tokenMasker: '••••••abcd' })
+    expect(lijst[0]).toMatchObject({ administratieId: NEP_ADM, tokenMasker: '••••••abcd', administratieNaam: null })
     await expect(opslag.verwijderKoppeling(hh, 'env')).rejects.toMatchObject({ status: 409 })
     await expect(opslag.kiesAdministratie(hh, 'env', '100000000000000002', undefined)).rejects.toMatchObject({ status: 409 })
+    expect(await opslag.kiesAdministratie(hh, 'env', NEP_ADM, undefined)).toMatchObject({ id: 'env', bron: 'env' })
+    expect(await opslag.laadKoppeling(hh, 'env')).toMatchObject({ token: NEP_TOKEN, naamBekend: false })
     expect(await opslag.laadIndeling(hh, 'env')).toEqual({})
-    await opslag.bewaarIndeling(hh, 'env', { '606': 'kosten' })
-    expect(await opslag.laadIndeling(hh, 'env')).toEqual({ '606': 'kosten' })
-    await opslag.raakAan(hh, 'env', 'Studio Voorbeeld')
-    expect((await opslag.lijstKoppelingen(hh)).length).toBe(2)
-    expect((await opslag.lijstKoppelingen(hh))[0].administratieNaam).toBe('Studio Voorbeeld')
+    expect(aantalRijen(hh, 'moneybird-env')).toBe(0)
 
-    const { exporteer, verwijderAlles } = await import('@/lib/dossier/opslag')
-    const exp = await exporteer(userId)
-    const tekst = JSON.stringify(exp)
+    // Gelijktijdig: indeling bewaren en aanraken maken samen precies één omgevingsrij.
+    await Promise.all([
+      opslag.bewaarIndeling(hh, 'env', { '606': 'kosten' }),
+      opslag.raakAan(hh, 'env', 'Studio Voorbeeld'),
+      opslag.bewaarIndeling(hh, 'env', { '607': 'omzet' }),
+    ])
+    expect(aantalRijen(hh, 'moneybird-env')).toBe(1)
+    expect(await opslag.laadIndeling(hh, 'env')).toEqual({ '606': 'kosten', '607': 'omzet' })
+    expect(await opslag.laadKoppeling(hh, 'env')).toMatchObject({ naamBekend: true, administratie: { id: NEP_ADM, naam: 'Studio Voorbeeld' } })
+    const envRij = getDb().select().from(koppelingen).where(and(eq(koppelingen.householdId, hh), eq(koppelingen.soort, 'moneybird-env'))).get()!
+    expect(envRij.tokenEnc).toBe('')
+    // De omgevingsrij is geen gewone koppeling: niet via haar numerieke id te bereiken.
+    expect(await opslag.laadKoppeling(hh, envRij.id)).toBeNull()
+    expect(await opslag.verwijderKoppeling(hh, envRij.id)).toBe(false)
+    expect((await opslag.lijstKoppelingen(hh)).length).toBe(2)
+    expect((await opslag.lijstKoppelingen(hh))[0]).toMatchObject({ administratieNaam: 'Studio Voorbeeld', laatstGebruikt: expect.any(String) })
+
+    const uitExport = opslag.exporteerKoppelingen(hh)
+    const tekst = JSON.stringify(uitExport)
     expect(tekst).not.toContain(NEP_TOKEN)
     expect(tekst).not.toContain('abcd')
-    const uitExport = exp.huishoudens[0].koppelingen
     expect(uitExport.map((k) => k.id).sort()).toEqual([expect.stringMatching(/^\d+$/), 'env'])
-    expect(uitExport.find((k) => k.id === 'env')).toMatchObject({ soort: 'moneybird-env', indeling: { '606': 'kosten' }, administratieNaam: 'Studio Voorbeeld' })
+    expect(uitExport.find((k) => k.id === 'env')).toMatchObject({ soort: 'moneybird-env', indeling: { '606': 'kosten', '607': 'omzet' }, administratieNaam: 'Studio Voorbeeld' })
     expect(uitExport.find((k) => k.id !== 'env')).toMatchObject({ soort: 'moneybird', label: 'Eigen', indeling: {} })
     for (const k of uitExport) expect(Object.keys(k)).not.toContain('token')
 
-    const { getDb } = await import('@/lib/db')
-    const { koppelingen } = await import('@/lib/db/schema')
-    const { eq } = await import('drizzle-orm')
-    await verwijderAlles(userId, false)
-    expect(await getDb().select().from(koppelingen).where(eq(koppelingen.householdId, hh))).toHaveLength(0)
+    // Huishouden weg: de koppelingen gaan mee via de cascade (foreign_keys staat aan).
+    getDb().delete(households).where(eq(households.id, hh)).run()
+    expect(aantalRijen(hh)).toBe(0)
+  })
+
+  it('samen met het dossier: koppelingen in de export, weg met Alles verwijderen', async () => {
+    zetMoneybirdFetch(nepMoneybird().fetch)
+    process.env.MONEYBIRD_TOKEN = NEP_TOKEN
+    process.env.MONEYBIRD_ADMINISTRATION_ID = NEP_ADM
+    h.echt = true
+    const { exporteer, huishoudenVan, verwijderAlles } = await import('@/lib/dossier/opslag')
+    const u = getDb().insert(users).values({ email: 'dossier@example.nl', passwordHash: 'x', totpEnabled: true }).returning().get()
+    const hh = await huishoudenVan(u.id)
+    await opslag.maakKoppeling(hh, { token: NEP_TOKEN, label: 'Eigen' })
+    await opslag.bewaarIndeling(hh, 'env', { '606': 'kosten' })
+
+    const exp = await exporteer(u.id)
+    expect(JSON.stringify(exp)).not.toContain(NEP_TOKEN)
+    const uitExport = exp.huishoudens[0].koppelingen
+    expect(uitExport.map((k) => k.id).sort()).toEqual([expect.stringMatching(/^\d+$/), 'env'])
+    expect(uitExport.find((k) => k.id === 'env')).toMatchObject({ soort: 'moneybird-env', indeling: { '606': 'kosten' } })
+
+    await verwijderAlles(u.id, false)
+    expect(aantalRijen(hh)).toBe(0)
   })
 
   it('end-to-end via de routes: toevoegen, administratie kiezen, importeren, indeling bewaren, verwijderen', async () => {
     const nep = nepMoneybird()
     zetMoneybirdFetch(nep.fetch)
-    const { userId } = await gebruikerMetHuishouden('e2e@example.nl')
+    const { userId } = gebruikerMetHuishouden('e2e@example.nl')
     await inloggen(userId)
     const teksten: string[] = []
     const lees = async (res: Response) => {
@@ -357,9 +488,19 @@ describe.skipIf(!BASIS_URL)('koppelingen op een echte database', () => {
 
     expect((await lees(await routes.een.DELETE(verzoek('DELETE', '/x'), params(id)))).data).toEqual({ ok: true })
     expect((await routes.een.DELETE(verzoek('DELETE', '/x'), params(id))).status).toBe(404)
+    expect((await routes.een.PATCH(verzoek('PATCH', '/x', { administratieId: NEP_ADM }), params(id))).status).toBe(404)
     expect((await lees(await routes.lijst.GET())).data.koppelingen).toEqual([])
 
     // Het token komt in geen enkele response voor.
     for (const t of teksten) expect(t).not.toContain(NEP_TOKEN)
+  })
+
+  it('zonder tabellen: 503 met de opdracht om te migreren', async () => {
+    const { userId } = gebruikerMetHuishouden('schema@example.nl')
+    await inloggen(userId)
+    getSqlite().exec('DROP TABLE koppelingen')
+    const res = await routes.lijst.GET()
+    expect(res.status).toBe(503)
+    expect(JSON.stringify(await res.json())).toMatch(/db:migrate/)
   })
 })

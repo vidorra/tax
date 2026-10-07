@@ -12,6 +12,11 @@ coverage
 
 # Alleen een map data/ in de root (lokale bestanden); lib/tax/years/data/ hoort wel in git
 /data/
+# SQLite-bestanden ook buiten data/ (bijvoorbeeld met een eigen DATABASE_PATH) nooit in git
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
 .DS_Store
 
 # Back-ups van de database (npm run backup -- maak), versleuteld maar nooit in git

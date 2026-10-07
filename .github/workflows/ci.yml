@@ -18,6 +18,10 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      - name: Migrations on an empty SQLite file (as start.sh does)
+        run: npm run db:migrate
+        env:
+          DATABASE_PATH: ${{ runner.temp }}/ibcalculator-ci.db
       - name: Parameter changelog check
         run: npx tsx scripts/tax-diff.ts --check
       - run: npm run build

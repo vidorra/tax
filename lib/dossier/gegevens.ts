@@ -130,18 +130,22 @@ const vanEigenaar = (e: GegevensEigenaar) => and(eq(households.id, e.householdId
 
 /** De gegevens van dit huishouden, ontsleuteld; null als het huishouden niet (meer) van deze gebruiker is. */
 export async function laadGegevens(e: GegevensEigenaar): Promise<GegevensAntwoord | null> {
-  const [rij] = await getDb().select({ gegevensEnc: households.gegevensEnc, updatedAt: households.updatedAt }).from(households).where(vanEigenaar(e)).limit(1)
+  const rij = getDb().select({ gegevensEnc: households.gegevensEnc, updatedAt: households.updatedAt }).from(households).where(vanEigenaar(e)).limit(1).get()
   if (!rij) return null
   return { gegevens: gegevensUitOpslag(ontsleutel<unknown>(rij.gegevensEnc, aad.huishouden(e.userId))), updatedAt: rij.updatedAt.toISOString() }
 }
 
-/** Vervangt de gegevens (al gecontroleerd met schoonGegevens). Geeft het tijdstip, of null zonder huishouden. */
+/**
+ * Vervangt de gegevens (al gecontroleerd met schoonGegevens). Geeft het tijdstip, of null zonder huishouden. Eén
+ * UPDATE die ook de eigenaar controleert, dus ondeelbaar zonder aparte transactie.
+ */
 export async function bewaarGegevens(e: GegevensEigenaar, gegevens: HuishoudenGegevens): Promise<string | null> {
   const nu = new Date()
-  const rijen = await getDb()
+  const rij = getDb()
     .update(households)
     .set({ gegevensEnc: versleutel(gegevens, aad.huishouden(e.userId)), updatedAt: nu })
     .where(vanEigenaar(e))
     .returning({ updatedAt: households.updatedAt })
-  return rijen[0] ? rijen[0].updatedAt.toISOString() : null
+    .get()
+  return rij ? rij.updatedAt.toISOString() : null
 }

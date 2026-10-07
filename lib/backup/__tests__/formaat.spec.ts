@@ -1,18 +1,22 @@
 import { createCipheriv, createDecipheriv, createHash, createHmac, hkdfSync, randomBytes } from 'node:crypto'
 import { gunzipSync, gzipSync } from 'node:zlib'
+
+import Database from 'better-sqlite3'
 import { describe, expect, it } from 'vitest'
+
 import {
   BackupFout,
   type BackupFoutCode,
   bestandsnaam,
   leesKop,
+  MAX_META_BYTES,
   ontsleutelBackup,
   sha256Hex,
   sleutelId,
   STANDAARD_MAX_BYTES,
   versleutelBackup,
 } from '../formaat'
-import type { BackupInhoud } from '../types'
+import type { BackupInhoud, BackupMeta } from '../types'
 
 const SLEUTEL = Buffer.from('6Kq1y0sJ8m2Qv7tZ3cXn9bR4hW5eL1pA0dF6gU2iO8s=', 'base64')
 const ANDERE_SLEUTEL = randomBytes(32)
@@ -21,20 +25,35 @@ const ANDERE_SLEUTEL = randomBytes(32)
 const MAGIC = Buffer.from('IBCBAK', 'ascii')
 const POS = { versie: 6, sleutelId: 7, salt: 15, iv: 31, tag: 43, data: 59 } as const
 
-function inhoud(extra: Partial<BackupInhoud> = {}): BackupInhoud {
+/** Een echt SQLite-bestand met een paar rijen, zoals snapshot.ts het maakt (alleen dan in het geheugen). */
+function database(rijen = 3, tekst = (i: number) => `rij ${i}`): Buffer {
+  const db = new Database(':memory:')
+  db.exec(`CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL) STRICT`)
+  const zet = db.prepare('INSERT INTO users (email) VALUES (?)')
+  db.transaction(() => {
+    for (let i = 0; i < rijen; i++) zet.run(i === 0 ? 'een@example.nl' : tekst(i))
+  })()
+  const buf = db.serialize()
+  db.close()
+  return buf
+}
+
+const DB = database()
+
+function meta(extra: Partial<BackupMeta> = {}): BackupMeta {
   return {
     formaat: 'ibcalculator-backup',
-    versie: 1,
+    versie: 2,
     gemaaktOp: '2027-02-01T00:30:12.345Z',
     gitSha: 'abc1234',
-    migraties: ['0001_init.sql', '0002_dossier.sql', '0003_moneybird.sql'],
-    tabellen: [
-      { naam: 'users', kolommen: ['id', 'email', 'created_at'], rijen: [{ id: 1, email: 'een@example.nl', created_at: '2026-10-04T15:32:00.123456+02:00' }] },
-      { naam: 'dossier_years', kolommen: ['id', 'jaar', 'data_enc'], rijen: [{ id: 7, jaar: 2025, data_enc: 'v2.aaa.bbb.ccc' }, { id: 8, jaar: 2026, data_enc: null }] },
-      { naam: 'leeg', kolommen: ['id'], rijen: [] },
-    ],
+    migraties: ['0001_init.sql'],
+    rijen: { users: 3, households: 0 },
     ...extra,
   }
+}
+
+function inhoud(extra: Partial<BackupInhoud> = {}): BackupInhoud {
+  return { ...meta(), database: DB, ...extra }
 }
 
 function code(fn: () => unknown): BackupFoutCode | 'geen fout' | 'andere fout' {
@@ -57,11 +76,12 @@ function fout(fn: () => unknown): BackupFout {
 }
 
 /** Bouwt een geldig versleutelde envelop om willekeurige plaintext, zodat ook de inhoudscontrole te testen is. */
-function envelop(plaintext: Buffer, sleutel = SLEUTEL): Buffer {
+function envelop(plaintext: Buffer, opties: { sleutel?: Buffer; versie?: number } = {}): Buffer {
+  const sleutel = opties.sleutel ?? SLEUTEL
   const salt = randomBytes(16)
   const iv = randomBytes(12)
   const id = createHmac('sha256', sleutel).update('ibcalculator back-up sleutel-id').digest().subarray(0, 8)
-  const kop = Buffer.concat([MAGIC, Buffer.from([1]), id, salt, iv])
+  const kop = Buffer.concat([MAGIC, Buffer.from([opties.versie ?? 2]), id, salt, iv])
   const k = Buffer.from(hkdfSync('sha256', sleutel, salt, Buffer.from('ibcalculator back-up v1'), 32))
   const c = createCipheriv('aes-256-gcm', k, iv)
   c.setAAD(kop)
@@ -69,48 +89,39 @@ function envelop(plaintext: Buffer, sleutel = SLEUTEL): Buffer {
   return Buffer.concat([kop, c.getAuthTag(), data])
 }
 
-const gzipJson = (waarde: unknown) => gzipSync(Buffer.from(JSON.stringify(waarde), 'utf8'))
+/** Plaintext van versie 2: gzip(lengte (4, BE) | meta-JSON | database). */
+function pakIn(m: unknown, db: Buffer = DB, metaTekst?: string): Buffer {
+  const json = Buffer.from(metaTekst ?? JSON.stringify(m), 'utf8')
+  const lengte = Buffer.alloc(4)
+  lengte.writeUInt32BE(json.length)
+  return gzipSync(Buffer.concat([lengte, json, db]))
+}
 
 describe('versleutelBackup en ontsleutelBackup', () => {
-  it('rondreis geeft dezelfde inhoud terug', () => {
+  it('rondreis geeft dezelfde metadata en precies dezelfde databasebytes terug', () => {
     const origineel = inhoud()
-    const bestand = versleutelBackup(origineel, SLEUTEL)
-    expect(ontsleutelBackup(bestand, SLEUTEL)).toEqual(origineel)
+    const terug = ontsleutelBackup(versleutelBackup(origineel, SLEUTEL), SLEUTEL)
+    expect(terug).toEqual(origineel)
+    expect(terug.database.equals(DB)).toBe(true)
+    // De database is weer een werkende SQLite-database.
+    const db = new Database(terug.database)
+    expect(db.prepare('SELECT count(*) AS n FROM users').get()).toEqual({ n: 3 })
+    db.close()
   })
 
-  it('rondreis met unicode, lege tekst, nul-tekens en gitSha null', () => {
-    const origineel = inhoud({
-      gitSha: null,
-      migraties: [],
-      tabellen: [
-        {
-          naam: 'notities',
-          kolommen: ['id', 'tekst', 'json', 'bytes'],
-          rijen: [
-            { id: 1, tekst: 'Crème brûlée, één € en 😀 en 中文 en ∑', json: { geneste: ['ä', 'ö', null, true, 1.5] }, bytes: '\\x00ff' },
-            { id: 2, tekst: '', json: null, bytes: null },
-            { id: 3, tekst: 'nul\u0000teken en "aanhalingstekens" en \\ en \n regel', json: [], bytes: '\\x' },
-            { id: 4, tekst: 'losse surrogaat \ud800 blijft heel', json: {}, bytes: null },
-          ],
-        },
-      ],
-    })
+  it('rondreis met gitSha null, geen migraties en lege aantallen', () => {
+    const origineel = inhoud({ gitSha: null, migraties: [], rijen: {} })
     expect(ontsleutelBackup(versleutelBackup(origineel, SLEUTEL), SLEUTEL)).toEqual(origineel)
   })
 
-  it('rondreis met grote inhoud', () => {
+  it('rondreis met een grotere database, kleiner dan het origineel', () => {
     let x = 12345
     const willekeurig = () => (x = (x * 1103515245 + 12345) % 2147483648)
-    const rijen = Array.from({ length: 20_000 }, (_, i) => ({
-      id: i,
-      huishouden_id: willekeurig() % 50,
-      data_enc: `v2.${willekeurig().toString(36)}.${willekeurig().toString(36)}.${'x'.repeat(willekeurig() % 120)}${willekeurig().toString(16)}`,
-      bijgewerkt: '2026-10-04T15:32:00.123456+02:00',
-    }))
-    const origineel = inhoud({ tabellen: [{ naam: 'dossier_years', kolommen: ['id', 'huishouden_id', 'data_enc', 'bijgewerkt'], rijen }] })
+    const groot = database(20_000, (i) => `v2.${willekeurig().toString(36)}.${i}.${'x'.repeat(willekeurig() % 120)}`)
+    const origineel = inhoud({ database: groot, rijen: { users: 20_000 } })
     const bestand = versleutelBackup(origineel, SLEUTEL)
-    expect(bestand.length).toBeLessThan(JSON.stringify(origineel).length)
-    expect(ontsleutelBackup(bestand, SLEUTEL)).toEqual(origineel)
+    expect(bestand.length).toBeLessThan(groot.length)
+    expect(ontsleutelBackup(bestand, SLEUTEL).database.equals(groot)).toBe(true)
   })
 
   it('twee keer versleutelen geeft verschillende bestanden met een eigen salt en iv', () => {
@@ -123,11 +134,10 @@ describe('versleutelBackup en ontsleutelBackup', () => {
     expect(ontsleutelBackup(a, SLEUTEL)).toEqual(ontsleutelBackup(b, SLEUTEL))
   })
 
-  it('volgt de beschreven indeling: magic, versie, sleutelId, salt, iv, tag, ciphertext met de kop als AAD', () => {
-    const origineel = inhoud()
-    const bestand = versleutelBackup(origineel, SLEUTEL)
+  it('volgt de beschreven indeling: kop als AAD, en in de plaintext lengte, meta-JSON en het SQLite-bestand', () => {
+    const bestand = versleutelBackup(inhoud(), SLEUTEL)
     expect(bestand.subarray(0, 6).toString('ascii')).toBe('IBCBAK')
-    expect(bestand[POS.versie]).toBe(1)
+    expect(bestand[POS.versie]).toBe(2)
     const id = createHmac('sha256', SLEUTEL).update('ibcalculator back-up sleutel-id').digest().subarray(0, 8)
     expect(bestand.subarray(POS.sleutelId, POS.salt).equals(id)).toBe(true)
     const salt = bestand.subarray(POS.salt, POS.iv)
@@ -136,14 +146,16 @@ describe('versleutelBackup en ontsleutelBackup', () => {
     const d = createDecipheriv('aes-256-gcm', k, iv)
     d.setAAD(bestand.subarray(0, POS.tag))
     d.setAuthTag(bestand.subarray(POS.tag, POS.data))
-    const plaintext = Buffer.concat([d.update(bestand.subarray(POS.data)), d.final()])
-    expect(JSON.parse(gunzipSync(plaintext).toString('utf8'))).toEqual(origineel)
+    const plaintext = gunzipSync(Buffer.concat([d.update(bestand.subarray(POS.data)), d.final()]))
+    const lengte = plaintext.readUInt32BE(0)
+    expect(JSON.parse(plaintext.subarray(4, 4 + lengte).toString('utf8'))).toEqual(meta())
+    expect(plaintext.subarray(4 + lengte).equals(DB)).toBe(true)
+    expect(plaintext.subarray(4 + lengte, 4 + lengte + 16).toString('latin1')).toBe('SQLite format 3\u0000')
   })
 
   it('bevat geen leesbare inhoud', () => {
     const bestand = versleutelBackup(inhoud(), SLEUTEL)
-    expect(bestand.includes('een@example.nl')).toBe(false)
-    expect(bestand.includes('users')).toBe(false)
+    for (const leesbaar of ['een@example.nl', 'users', 'SQLite format', 'ibcalculator-backup', 'abc1234']) expect(bestand.includes(leesbaar), leesbaar).toBe(false)
   })
 
   it('weigert een sleutel die geen 32 bytes is', () => {
@@ -154,7 +166,10 @@ describe('versleutelBackup en ontsleutelBackup', () => {
 
   it('weigert een ongeldige inhoud al bij het versleutelen', () => {
     expect(code(() => versleutelBackup({ ...inhoud(), gemaaktOp: 'gisteren' }, SLEUTEL))).toBe('inhoud')
-    expect(code(() => versleutelBackup({ ...inhoud(), tabellen: [{ naam: 'x', kolommen: ['a'], rijen: [null as never] }] }, SLEUTEL))).toBe('inhoud')
+    expect(code(() => versleutelBackup({ ...inhoud(), rijen: { users: -1 } }, SLEUTEL))).toBe('inhoud')
+    expect(code(() => versleutelBackup({ ...inhoud(), database: randomBytes(4096) }, SLEUTEL))).toBe('inhoud')
+    expect(code(() => versleutelBackup({ ...inhoud(), database: Buffer.alloc(0) }, SLEUTEL))).toBe('inhoud')
+    expect(code(() => versleutelBackup({ ...inhoud(), migraties: ['x'.repeat(MAX_META_BYTES)] }, SLEUTEL))).toBe('inhoud')
   })
 })
 
@@ -167,30 +182,42 @@ describe('foutcodes', () => {
     expect(code(() => ontsleutelBackup(geldig.subarray(0, 14), SLEUTEL))).toBe('formaat')
     expect(code(() => ontsleutelBackup(geldig.subarray(0, 30), SLEUTEL))).toBe('formaat')
     expect(code(() => ontsleutelBackup(geldig.subarray(0, POS.data - 1), SLEUTEL))).toBe('formaat')
-    expect(code(() => ontsleutelBackup(gzipJson(inhoud()), SLEUTEL))).toBe('formaat')
+    expect(code(() => ontsleutelBackup(DB, SLEUTEL))).toBe('formaat')
     expect(code(() => ontsleutelBackup(Buffer.from('PK\u0003\u0004 dit is een zip'), SLEUTEL))).toBe('formaat')
     expect(fout(() => ontsleutelBackup(Buffer.from('%PDF-1.7 en nog veel meer tekst hier om lang genoeg te zijn voor de kop van een back-up'), SLEUTEL)).message).toBe(
       'Dit bestand is geen back-up van ibcalculator.',
     )
   })
 
-  it('formaat: kop plus tag zonder ciphertext is wel lang genoeg, maar dan klopt de controle niet', () => {
+  it('kop plus tag zonder ciphertext is wel lang genoeg, maar dan klopt de controle niet', () => {
     expect(code(() => ontsleutelBackup(geldig.subarray(0, POS.data), SLEUTEL))).toBe('beschadigd')
   })
 
-  it('versie: onbekende formaatversie', () => {
-    for (const v of [0, 2, 255]) {
+  it('versie: een onbekende formaatversie', () => {
+    for (const v of [0, 3, 255]) {
       const b = Buffer.from(geldig)
       b[POS.versie] = v
       const f = fout(() => ontsleutelBackup(b, SLEUTEL))
       expect(f.code).toBe('versie')
       expect(f.message).toContain(`formaatversie ${v}`)
+      expect(f.message).toContain('kan alleen versie 2 lezen')
     }
+  })
+
+  it('versie 1 (de oude JSON-dump van Postgres) wordt geweigerd met een eigen melding', () => {
+    const oud = envelop(gzipSync(Buffer.from(JSON.stringify({ formaat: 'ibcalculator-backup', versie: 1, gemaaktOp: '2026-10-04T12:00:00.000Z', gitSha: null, migraties: [], tabellen: [] }))), {
+      versie: 1,
+    })
+    const f = fout(() => ontsleutelBackup(oud, SLEUTEL))
+    expect(f.code).toBe('versie')
+    expect(f.message).toContain('formaatversie 1')
+    expect(f.message).toContain('Postgres')
+    expect(leesKop(oud)).toEqual({ versie: 1, sleutelId: sleutelId(SLEUTEL) })
   })
 
   it('versie: een korte kop van een nieuwere versie geeft versie, geen formaat', () => {
     const b = Buffer.from(geldig.subarray(0, 20))
-    b[POS.versie] = 2
+    b[POS.versie] = 3
     expect(code(() => ontsleutelBackup(b, SLEUTEL))).toBe('versie')
   })
 
@@ -227,22 +254,30 @@ describe('foutcodes', () => {
     }
   })
 
-  it('inhoud: geldige versleuteling maar geen gzip of geen JSON', () => {
+  it('inhoud: geldige versleuteling maar geen gzip, geen kop of een kop die niet klopt', () => {
     expect(fout(() => ontsleutelBackup(envelop(Buffer.from('gewoon tekst')), SLEUTEL)).code).toBe('inhoud')
-    const geenJson = fout(() => ontsleutelBackup(envelop(gzipSync(Buffer.from('{"geheim": "w8woord", kapot'))), SLEUTEL))
+    expect(fout(() => ontsleutelBackup(envelop(gzipSync(Buffer.from([0, 0]))), SLEUTEL)).code).toBe('inhoud')
+    const teLang = Buffer.alloc(4)
+    teLang.writeUInt32BE(1000)
+    expect(fout(() => ontsleutelBackup(envelop(gzipSync(Buffer.concat([teLang, Buffer.from('{}')]))), SLEUTEL)).code).toBe('inhoud')
+    const veelTeLang = Buffer.alloc(4)
+    veelTeLang.writeUInt32BE(MAX_META_BYTES + 1)
+    expect(fout(() => ontsleutelBackup(envelop(gzipSync(Buffer.concat([veelTeLang, Buffer.alloc(MAX_META_BYTES + 1), DB]))), SLEUTEL)).code).toBe('inhoud')
+    const geenJson = fout(() => ontsleutelBackup(envelop(pakIn(null, DB, '{"geheim": "w8woord", kapot')), SLEUTEL))
     expect(geenJson.code).toBe('inhoud')
     expect(geenJson.message).not.toContain('w8woord')
     expect(geenJson.cause).toBeUndefined()
   })
 
-  it('inhoud: de vorm klopt niet', () => {
-    const goed = inhoud()
+  it('inhoud: de vorm van de metadata klopt niet', () => {
+    const goed = meta()
     const fouten: unknown[] = [
       null,
       [],
       'tekst',
       { ...goed, formaat: 'iets-anders' },
-      { ...goed, versie: 2 },
+      { ...goed, versie: 1 },
+      { ...goed, versie: 3 },
       { ...goed, gemaaktOp: undefined },
       { ...goed, gemaaktOp: '2027-02-01' },
       { ...goed, gemaaktOp: '2027-02-30T10:00:00Z' },
@@ -252,49 +287,59 @@ describe('foutcodes', () => {
       { ...goed, gitSha: undefined },
       { ...goed, migraties: '0001' },
       { ...goed, migraties: ['0001', 2] },
-      { ...goed, tabellen: {} },
-      { ...goed, tabellen: [null] },
-      { ...goed, tabellen: [{ kolommen: [], rijen: [] }] },
-      { ...goed, tabellen: [{ naam: '', kolommen: [], rijen: [] }] },
-      { ...goed, tabellen: [{ naam: 'a', kolommen: 'id', rijen: [] }] },
-      { ...goed, tabellen: [{ naam: 'a', kolommen: [1], rijen: [] }] },
-      { ...goed, tabellen: [{ naam: 'a', kolommen: ['id'] }] },
-      { ...goed, tabellen: [{ naam: 'a', kolommen: ['id'], rijen: [[1]] }] },
-      { ...goed, tabellen: [{ naam: 'a', kolommen: ['id'], rijen: [{ id: 1 }, null] }] },
-      { ...goed, tabellen: [{ naam: 'a', kolommen: ['id'], rijen: [42] }] },
-      { ...goed, tabellen: [{ naam: 'a', kolommen: ['id'], rijen: [] }, { naam: 'a', kolommen: ['id'], rijen: [] }] },
+      { ...goed, rijen: undefined },
+      { ...goed, rijen: [] },
+      { ...goed, rijen: { users: '3' } },
+      { ...goed, rijen: { users: 1.5 } },
+      { ...goed, rijen: { users: -1 } },
+      { ...goed, rijen: { '': 1 } },
     ]
     for (const [i, waarde] of fouten.entries()) {
-      expect(code(() => ontsleutelBackup(envelop(gzipJson(waarde)), SLEUTEL)), `geval ${i}`).toBe('inhoud')
+      expect(code(() => ontsleutelBackup(envelop(pakIn(waarde)), SLEUTEL)), `geval ${i}`).toBe('inhoud')
     }
   })
 
-  it('inhoud: meldingen noemen geen inhoud van rijen', () => {
-    const f = fout(() =>
-      ontsleutelBackup(envelop(gzipJson({ ...inhoud(), tabellen: [{ naam: 'users', kolommen: ['email'], rijen: [{ email: 'geheim@example.nl' }, 'geheim@example.nl'] }] })), SLEUTEL),
-    )
+  it('inhoud: het databasebestand is geen SQLite-bestand', () => {
+    const kapotteKop = Buffer.from(DB)
+    kapotteKop[0] = 0x73
+    const vreemdePagina = Buffer.from(DB)
+    vreemdePagina.writeUInt16BE(1000, 16)
+    for (const [naam, db] of [
+      ['leeg', Buffer.alloc(0)],
+      ['willekeurig', randomBytes(8192)],
+      ['kop', kapotteKop],
+      ['paginagrootte', vreemdePagina],
+      ['afgekapt', DB.subarray(0, DB.length - 100)],
+      ['alleen de kop', DB.subarray(0, 100)],
+    ] as const) {
+      const f = fout(() => ontsleutelBackup(envelop(pakIn(meta(), db)), SLEUTEL))
+      expect(f.code, naam).toBe('inhoud')
+      expect(f.message, naam).toContain('geen geldig SQLite-bestand')
+    }
+  })
+
+  it('inhoud: meldingen noemen geen inhoud', () => {
+    const f = fout(() => ontsleutelBackup(envelop(pakIn({ ...meta(), gitSha: { geheim: 'geheim@example.nl' } })), SLEUTEL))
     expect(f.code).toBe('inhoud')
-    expect(f.message).toContain('rij 2')
-    expect(f.message).toContain('users')
+    expect(f.message).toContain('gitSha')
     expect(f.message).not.toContain('geheim')
   })
 
   it('inhoud: tijdstippen met microseconden en een offset zijn geldig', () => {
     for (const gemaaktOp of ['2027-02-01T00:30:12Z', '2027-02-01T00:30:12.123456+01:00', '2026-10-04T15:32:00.123-02:30']) {
-      const i = inhoud({ gemaaktOp })
-      expect(ontsleutelBackup(envelop(gzipJson(i)), SLEUTEL)).toEqual(i)
+      expect(ontsleutelBackup(envelop(pakIn(meta({ gemaaktOp }))), SLEUTEL)).toEqual(inhoud({ gemaaktOp }))
     }
   })
 
   it('zip-bom: uitpakken stopt bij maxBytes', () => {
-    const groot = inhoud({ tabellen: [{ naam: 'opvulling', kolommen: ['tekst'], rijen: [{ tekst: 'a'.repeat(3_000_000) }] }] })
-    const bestand = versleutelBackup(groot, SLEUTEL)
-    expect(bestand.length).toBeLessThan(20_000)
+    const groot = database(2, () => 'a'.repeat(3_000_000))
+    const bestand = versleutelBackup(inhoud({ database: groot }), SLEUTEL)
+    expect(bestand.length).toBeLessThan(40_000)
     const f = fout(() => ontsleutelBackup(bestand, SLEUTEL, { maxBytes: 1_000_000 }))
     expect(f.code).toBe('inhoud')
     expect(f.message).toContain('groter dan de grens')
-    expect(ontsleutelBackup(bestand, SLEUTEL, { maxBytes: 4_000_000 })).toEqual(groot)
-    expect(ontsleutelBackup(bestand, SLEUTEL)).toEqual(groot)
+    expect(ontsleutelBackup(bestand, SLEUTEL, { maxBytes: groot.length + 4096 }).database.equals(groot)).toBe(true)
+    expect(ontsleutelBackup(bestand, SLEUTEL).database.equals(groot)).toBe(true)
   })
 
   it('zip-bom: ook een envelop van een vreemde maker wordt begrensd', () => {
@@ -311,8 +356,7 @@ describe('foutcodes', () => {
 
 describe('leesKop en sleutelId', () => {
   it('leest versie en sleutelId zonder sleutel', () => {
-    const bestand = versleutelBackup(inhoud(), SLEUTEL)
-    expect(leesKop(bestand)).toEqual({ versie: 1, sleutelId: sleutelId(SLEUTEL) })
+    expect(leesKop(versleutelBackup(inhoud(), SLEUTEL))).toEqual({ versie: 2, sleutelId: sleutelId(SLEUTEL) })
   })
 
   it('sleutelId is 16 hextekens, vast per sleutel en anders per sleutel', () => {
@@ -324,8 +368,8 @@ describe('leesKop en sleutelId', () => {
 
   it('geeft een onbekende versie gewoon terug', () => {
     const b = versleutelBackup(inhoud(), SLEUTEL)
-    b[POS.versie] = 2
-    expect(leesKop(b).versie).toBe(2)
+    b[POS.versie] = 3
+    expect(leesKop(b).versie).toBe(3)
   })
 
   it('gooit formaat bij een ongeldig bestand', () => {

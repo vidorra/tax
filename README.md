@@ -6,12 +6,13 @@ Het plan en de verantwoording staan buiten deze repository. Conventies: `CLAUDE.
 
 ## Stack
 
-Next.js 15 (App Router), React 19, TypeScript, Tailwind 3.4, Drizzle + Postgres, vitest. Deploy als Docker-container, bijvoorbeeld via CapRover.
+Next.js 15 (App Router), React 19, TypeScript, Tailwind 3.4, Drizzle + SQLite (better-sqlite3), vitest. Deploy als Docker-container, bijvoorbeeld via CapRover.
 
 ## Ontwikkelen
 
 ```bash
 npm install
+npm run db:migrate   # maakt ./data/ibcalculator.db aan en voert de migraties uit
 npm run dev          # http://localhost:3000
 npm test             # rekenkern, jaarparameters, API, dossier, rapport
 npm run typecheck
@@ -26,9 +27,13 @@ npx tsx scripts/tax-derive.ts 2029 --from 2028          # skelet voor een nieuw 
 - De publieke tests rekenen met een verzonnen voorbeeldhuishouden (`lib/voorbeeld/`: 2024 en 2021, twee partners met elk een eenmanszaak, kind, eigen woning, box 3 en lijfrente). Een schone kloon draait volledig groen.
 - De regressietests tegen echte aangiftes (de engine en het fiscaal rapport op de euro tegen het rapport van een accountant) staan met hun fixtures in mappen `prive/` die git negeert, zoals `lib/tax/__tests__/prive/` en `lib/rapport/__tests__/prive/`. Ze draaien alleen lokaal; zonder die mappen slaan ze zich over. Een privé-test laadt zijn fixture met `laadPrive` uit `lib/__tests__/prive.ts` en `describe.skipIf`, nooit met een statische import.
 - Zet nooit echte bedragen, namen, datums, rekening- of polisnummers of gegevens van een accountant in bestanden die git volgt, ook niet in commentaar. Brondocumenten (PDF's, schermafbeeldingen) horen niet in de repository.
-- De databasetests draaien als `IB_TEST_DATABASE_URL` naar een wegwerpdatabase wijst; anders slaan ze zich over.
+- De databasetests draaien altijd. Elke test krijgt een eigen, gemigreerd SQLite-bestand in een tijdelijke map (`lib/db/testdb.ts`); er is geen databaseserver nodig.
 
-De publieke calculator en de deel-calculators werken zonder database. Het dossier heeft Postgres en de geheimen hieronder nodig; zonder die variabelen tonen de dossierpagina's een configuratiemelding en geven de API's 503.
+De publieke calculator en de deel-calculators werken zonder database. Het dossier heeft `AUTH_SECRET`, `DOSSIER_KEY` en een map nodig waarin de app het databasebestand kan schrijven; ontbreekt een daarvan, dan tonen de dossierpagina's een configuratiemelding en geven de API's 503.
+
+### Database
+
+De database is één SQLite-bestand, zonder aparte databaseserver: lokaal `./data/ibcalculator.db` (git negeert `data/`), in de container `/app/data/ibcalculator.db`. Een ander pad zet je met `DATABASE_PATH`. Naast het bestand staan tijdens het draaien `-wal` en `-shm`; die horen erbij, dus kopieer het bestand nooit los terwijl de app draait, maar maak een back-up (zie Back-up). Er schrijft één proces tegelijk (`schrijf()` in `lib/db`, met `BEGIN IMMEDIATE`), dus de app draait met één instantie. Migraties staan in `migrations/`; `npm run db:migrate` voert de openstaande uit, en in de container doet `start.sh` dat bij elke start.
 
 ## Opbouw
 
@@ -47,7 +52,6 @@ De publieke calculator en de deel-calculators werken zonder database. Het dossie
 | Variabele | Nodig voor | Toelichting |
 |---|---|---|
 | `NEXT_PUBLIC_SITE_URL` | alles | Publieke URL; ook als build-arg (canonical, sitemap) |
-| `DATABASE_URL` | dossier | Postgres, bijvoorbeeld `postgresql://ibcalculator:wachtwoord@db-host:5432/ibcalculator` |
 | `AUTH_SECRET` | dossier | Minimaal 32 tekens, willekeurig |
 | `DOSSIER_KEY` | dossier | 32 bytes als base64 (`node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`) |
 | `TRUSTED_PROXY_HOPS` | rate limits | Standaard 1 (één reverse proxy, zoals de nginx van CapRover); 2 met Cloudflare ervoor |
@@ -58,6 +62,7 @@ De publieke calculator en de deel-calculators werken zonder database. Het dossie
 | `MAIL_FROM`, `MAIL_REPLY_TO` | back-up | Afzender op een geverifieerd domein, bijvoorbeeld `noreply@example.nl`; antwoordadres optioneel |
 | `RESEND_API_KEY` | back-up | Mailen via Resend (voorkeur) |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` | back-up | Alternatief zonder Resend; poort standaard 587, bij 465 met TLS |
+| `DATABASE_PATH` | dossier | Optioneel. Pad van het SQLite-bestand; standaard `data/ibcalculator.db` in de werkmap. De image zet `/app/data/ibcalculator.db`, dus in de container laat je hem weg. De map moet schrijfbaar zijn |
 
 `DOSSIER_KEY` nooit wijzigen zonder herversleuteling: bestaande dossiers zijn dan niet meer te openen.
 
@@ -78,7 +83,7 @@ Het dossier kan per onderneming de cijfers van een jaar uit Moneybird halen (all
 - **In het dossier:** voeg het token toe als koppeling. Het wordt eerst bij Moneybird gecontroleerd en daarna versleuteld opgeslagen (AES-256-GCM met `DOSSIER_KEY`, gebonden aan huishouden en rij); naar de browser gaat alleen een masker. Maximaal tien koppelingen per huishouden.
 - **Uit de omgeving:** met `MONEYBIRD_TOKEN` en `MONEYBIRD_ADMINISTRATION_ID` verschijnt een extra koppeling `env`. Die kan niet in de app worden verwijderd; haar eigen indeling wordt in de database bewaard.
 - **Limieten:** Moneybird staat 150 verzoeken per 5 minuten toe; één import kost ongeveer tien verzoeken plus een per klant zonder naam in het rapport. De app staat per huishouden tien imports per 5 minuten toe.
-- Code: `lib/moneybird/` (contract in `types.ts`), routes onder `app/api/dossier/koppelingen/`, tabel `koppelingen` (migratie 0003).
+- Code: `lib/moneybird/` (contract in `types.ts`), routes onder `app/api/dossier/koppelingen/`, tabel `koppelingen`.
 
 ## Dossier over meerdere jaren
 
@@ -110,7 +115,7 @@ Een jaar in het dossier heeft vijf tabs: Invoer en resultaat, Planning, Accounta
 - *Broker-CSV* (bij Vermogen, *Importeer uit een bestand*): DEGIRO (rekeningoverzicht en portefeuille), Interactive Brokers, Trading 212, Saxo, BUX, Rabobank Beleggen, Bitvavo en Coinbase, en elk ander CSV-bestand met een kolomkoppeling die per browser wordt onthouden. Het bestand wordt in de browser gelezen; naar de server gaan alleen de bedragen die je overneemt en een rekeningsleutel (HMAC, zonder rekeningnummer). Per rekening één samenvatting en per bezitting een uitklap; een import vervangt de jaartotalen van die rekening en is ongedaan te maken. Het land van de bronbelasting komt van de broker, het ISIN of een vraag als het ingehouden percentage niet bij het land past. Voorbeeldbestanden en de verwachte uitkomst staan in `lib/import/__tests__/fixtures/`.
 - *JSON* (op het overzicht, *Importeren (JSON)*): een export van het hele dossier of van één jaar. Per jaar Toevoegen, Vervangen of Overslaan, optioneel met de bedragen van de accountant en de vinkjes van Aangifte invullen. Alles gebeurt in één transactie; daarvoor bewaart de server een herstelpunt (30 dagen) en *Ongedaan maken* zet de vorige versie terug.
 
-**Ontwikkelen met worktrees.** `scripts/ronde2-worktree.sh <agent> <poort>` maakt een git-worktree met een eigen branch, poort, `.env.local` en databaseschema; `scripts/dev-account.ts` maakt in dat schema een ontwikkelaccount met 2FA (`--code` geeft de huidige code).
+**Ontwikkelen met worktrees.** `scripts/ronde2-worktree.sh <agent> <poort>` maakt een git-worktree met een eigen branch, poort en `.env.local`. De database is `./data/ibcalculator.db` in die worktree, dus elke worktree heeft vanzelf een eigen database. `scripts/dev-account.ts` voert daarin de migraties uit en maakt een ontwikkelaccount met 2FA (`--code` geeft de huidige code); het weigert te draaien met `NODE_ENV=production` of een database onder `/app/data`.
 
 ## Fiscaal rapport (PDF en Excel)
 
@@ -134,7 +139,7 @@ Een voorbeeld zonder dossier maak je met `npm run rapport:voorbeeld -- <map>` (o
 
 Op 1 februari en 1 augustus (Nederlandse tijd) maakt de server een volledige back-up van de database en mailt die als bijlage naar `BACKUP_MAIL_TO`.
 
-- **Wat erin zit:** alle tabellen van het dossier: accounts (e-mail, wachtwoordhash en TOTP-geheim), huishoudens, belastingjaren, snapshots, accountantsregels en Moneybird-koppelingen. De administratie van de back-ups zelf en `_migrations` gaan niet mee; die bouwt het herstel opnieuw op.
+- **Wat erin zit:** een consistente kopie van het databasebestand, gemaakt met de back-upfunctie van SQLite terwijl de app gewoon doordraait. Daarin staan alle tabellen van het dossier: accounts (e-mail, wachtwoordhash en TOTP-geheim), huishoudens, belastingjaren, snapshots, accountantsregels en Moneybird-koppelingen, plus de lijst met uitgevoerde migraties. Alleen de administratie van de back-ups zelf gaat niet mee.
 - **Versleuteling:** het hele bestand (`.ibcbak`) is gzip plus AES-256-GCM, met per back-up een eigen sleutel die is afgeleid van `DOSSIER_KEY` (HKDF). Elke gewijzigde byte valt op bij het openen. De mail zelf bevat alleen datum, grootte, SHA-256, aantallen rijen per tabel en de herstelstappen, geen financiële gegevens en geen adressen van gebruikers.
 - **Waarom je `DOSSIER_KEY` apart bewaart:** zonder die sleutel is de back-up niet te openen, en de dossiers erin ook niet. Gaat de server verloren, dan heb je de mail én de sleutel nodig. Bewaar de sleutel daarom op een andere plek dan de mailbox, bijvoorbeeld in je wachtwoordmanager.
 - **Wanneer precies:** de scheduler start met de server (`instrumentation.ts`) en kijkt elk uur. Was de server op 1 februari niet bereikbaar, dan haalt hij de back-up tot 30 dagen later in. Na een mislukte poging wacht hij 1, 2, 4, 8, 16 en daarna 24 uur. Een back-up groter dan 20 MB gaat niet per mail (status te groot); maak die met het script hieronder.
@@ -144,31 +149,56 @@ Op 1 februari en 1 augustus (Nederlandse tijd) maakt de server een volledige bac
 ### Terugzetten
 
 1. Sla de bijlage op, bijvoorbeeld als `backups/ibcalculator-backup-2027-02-01.ibcbak`. De map `backups/` staat in `.gitignore` en `.dockerignore`.
-2. Zet `DATABASE_URL` op de database waarin je wilt terugzetten en `DOSSIER_KEY` op de sleutel waarmee de back-up is gemaakt. Gebruik een versie van de app die minstens zo nieuw is als die in de back-up.
-3. Controleer het bestand: `npm run backup -- bekijk backups/ibcalculator-backup-2027-02-01.ibcbak`. Je ziet datum, versie van de app, migraties en rijen per tabel. Met een andere sleutel krijg je een melding met de sleutel-id van het bestand.
-4. Zet het terug: `npm run backup -- herstel backups/ibcalculator-backup-2027-02-01.ibcbak`. Het script maakt eerst precies de tabellen van de back-up aan (de migraties uit het bestand), zet de rijen terug in één transactie en voert daarna nieuwere migraties uit, zodat die ook over de teruggezette gegevens lopen. Het stopt zonder iets te wijzigen als:
-   - de database tabellen van een andere app bevat (kies dan een lege database);
-   - er al gegevens in staan (met `--overschrijf` vervang je ze; het script meldt hoeveel accounts verdwijnen die niet in de back-up zitten);
-   - de database al verder gemigreerd is dan de back-up. Dat is normaal als de app al draait, want `start.sh` migreert bij elke start. Gebruik dan `--schema-opnieuw`: dat verwijdert de tabellen van ibcalculator in die database en bouwt ze op tot de stand van de back-up. Staan er gegevens in, dan is daarnaast `--overschrijf` nodig.
-5. Na elk herstel zijn alle bestaande sessies ingetrokken, ook sessies die iemand intussen op een lege installatie heeft verkregen. Start de app opnieuw. Inloggen gaat met het account en de tweestapsverificatie uit de back-up.
+2. Zet `DOSSIER_KEY` op de sleutel waarmee de back-up is gemaakt. Het herstel schrijft in het databasebestand uit `DATABASE_PATH` (lokaal standaard `./data/ibcalculator.db`, in de container `/app/data/ibcalculator.db`). Gebruik een versie van de app die minstens zo nieuw is als die in de back-up.
+3. Controleer het bestand: `npm run backup -- bekijk backups/ibcalculator-backup-2027-02-01.ibcbak`. Je ziet datum, versie van de app, migraties, rijen per tabel en of het databasebestand in de back-up in orde is. Met een andere sleutel krijg je een melding met de sleutel-id van het bestand. `bekijk` schrijft niets naar schijf.
+4. Zet het terug: `npm run backup -- herstel backups/ibcalculator-backup-2027-02-01.ibcbak`. Het script ontsleutelt de back-up, controleert de kopie en zet hem met de back-upfunctie van SQLite in het databasebestand, in één keer en in hetzelfde bestand, ook terwijl de app draait. Daarna voert het de migraties uit die nieuwer zijn dan de back-up, zodat die ook over de teruggezette gegevens lopen. Het stopt zonder iets te wijzigen als:
+   - er al gegevens in de database staan. Met `--overschrijf` vervang je ze; het script meldt hoeveel accounts verdwijnen die niet in de back-up zitten. Een lege database, zoals `start.sh` die bij de eerste start aanmaakt, telt niet: na een nieuwe deploy zet je een back-up terug zonder vlag;
+   - de back-up van een nieuwere versie van de app komt (migraties die deze versie niet kent): deploy eerst die versie. Hetzelfde geldt als de database zelf zulke migraties heeft;
+   - op `DATABASE_PATH` iets anders staat dan een database van ibcalculator, ook met `--overschrijf`;
+   - het bestand beschadigd is of met een andere sleutel is gemaakt;
+   - de app langer dan 30 seconden achter elkaar schrijft (bijvoorbeeld een grote import). Probeer het dan zo opnieuw.
+5. Na elk herstel zijn alle bestaande sessies ingetrokken, ook sessies die iemand intussen op een lege installatie heeft verkregen, en krijgen nieuwe rijen geen id dat in de database al eens was uitgegeven. Inloggen gaat met het account en de tweestapsverificatie uit de back-up; de app hoeft niet opnieuw te starten. De lijst met back-ups op de kaart begint na een herstel leeg. Valt het herstel binnen 30 dagen na 1 februari of 1 augustus, dan mailt de server die back-up daarna opnieuw.
 
-Na een volledige uitval (nieuwe Postgres, app opnieuw gedeployed) is de snelste route in de container: `npx tsx scripts/backup.ts herstel <bestand> --schema-opnieuw --overschrijf`. Zet eerst het bestand in de container en controleer met `bekijk` dat de sleutel klopt.
+Na een volledige uitval (server opnieuw ingericht, app opnieuw gedeployed met een lege Persistent Directory) zet je het bestand in de container en herstel je daar. Op de server, met de container van de app:
+
+```bash
+docker cp ibcalculator-backup-2027-02-01.ibcbak <container>:/tmp/
+docker exec -u node <container> npx tsx scripts/backup.ts bekijk /tmp/ibcalculator-backup-2027-02-01.ibcbak
+docker exec -u node <container> npx tsx scripts/backup.ts herstel /tmp/ibcalculator-backup-2027-02-01.ibcbak
+```
+
+De container-id vind je met `docker ps --filter name=srv-captain--<app>`. Draai scripts in de container als gebruiker `node` (`-u node`), want de app draait ook als `node`: bestanden die root aanmaakt, kan de app niet schrijven. Als root weigert het back-upscript daarom `maak` en `herstel` met die melding. Is er toch iets als root gebeurd, start de app dan opnieuw: `start.sh` geeft de bestanden in `/app/data` bij elke start terug aan `node`.
 
 Verder:
 
 - `npm run backup -- maak` schrijft een back-up naar `./backups/`. Met `--uit <map>` kies je een andere map, met `--mail` gaat hij ook per mail (en telt hij als back-up op verzoek).
-- `npm run backup -- ontsleutel <bestand> <uit.json>` schrijft de ontsleutelde inhoud als JSON. Daarin staan gevoelige gegevens (adressen, wachtwoordhashes, TOTP-geheimen); verwijder het bestand na gebruik.
-- In de container op de server werkt hetzelfde script: `npx tsx scripts/backup.ts maak --mail`.
-- Code: `lib/backup/` (contract in `types.ts`), tabel `backups` (migratie 0004), route `app/api/dossier/backup`, kaart `components/dossier/BackupKaart.tsx`.
+- `npm run backup -- ontsleutel <bestand> <uit.db>` schrijft het ontsleutelde SQLite-bestand. Daarin staan gevoelige gegevens (mailadres, wachtwoordhash en TOTP-geheim van het account, naast de versleutelde dossiers); verwijder het bestand na gebruik.
+- In de container op de server werkt hetzelfde script: `docker exec -u node <container> npx tsx scripts/backup.ts maak --mail`.
+- Code: `lib/backup/` (contract in `types.ts`), tabel `backups`, route `app/api/dossier/backup`, kaart `components/dossier/BackupKaart.tsx`.
 
 ## Deploy (CapRover)
 
-1. Maak in CapRover een app voor ibcalculator en een Postgres-app voor de database.
-2. Zet de omgevingsvariabelen hierboven (de `NEXT_PUBLIC_*`-variabelen ook als build-arg), voor de back-up ook `BACKUP_MAIL_TO` en de mailvariabelen.
-3. Zet in GitHub de secrets `CAPROVER_SERVER`, `APP_NAME` en `APP_TOKEN`; zonder die secrets slaat de workflow de deploy over en draait alleen test en build.
-4. `start.sh` voert bij elke start `scripts/migrate.ts` uit als `DATABASE_URL` is gezet (idempotent, per bestand een transactie).
-5. Open `/dossier/setup` direct na de eerste deploy: de eerste die daar een account aanmaakt, claimt de instantie.
-6. Controleer `/api/health` (laatste definitieve jaar, varianten, versie).
+De database zit in de app zelf: een SQLite-bestand in een Persistent Directory. Er is geen aparte database-app en geen `DATABASE_URL`.
+
+1. Maak in CapRover een app voor ibcalculator en zet bij het aanmaken **Has Persistent Data** aan. Dat kan later niet meer; vergeet je het, maak de app dan opnieuw aan.
+2. Voeg bij App Configs onder **Persistent Directories** een map toe: *Path in App* `/app/data`, *Label* bijvoorbeeld `ibcalculator-data`. CapRover maakt daar een Docker-volume van dat deploys en herstarts overleeft. Zonder deze map staat de database in de container en is hij bij de volgende deploy weg.
+3. Zet **Container HTTP Port** op 3000, **HTTPS** aan met doorsturen van HTTP naar HTTPS, en **Instance Count** op 1. Er schrijft één proces tegelijk in het databasebestand, en de back-upplanner en de rate limits draaien in het geheugen van één container.
+4. Zet de omgevingsvariabelen hierboven (de `NEXT_PUBLIC_*`-variabelen ook als build-arg), voor de back-up ook `BACKUP_MAIL_TO` en de mailvariabelen. `DATABASE_PATH` laat je weg; de image zet `/app/data/ibcalculator.db`.
+5. Zet in GitHub de secrets `CAPROVER_SERVER`, `APP_NAME` en `APP_TOKEN`; zonder die secrets slaat de workflow de deploy over en draait alleen test en build.
+6. `start.sh` geeft bij elke start de map `/app/data` aan de gebruiker `node` (een volume of een map op de host is vaak van root), voert als `node` de migraties uit op het databasebestand (idempotent, per migratie een transactie; bij de eerste start maakt dat het bestand aan) en start dan de server, ook als het migreren mislukt, zodat de publieke rekentool blijft werken.
+7. Open `/dossier/setup` direct na de eerste deploy: de eerste die daar een account aanmaakt, claimt de instantie.
+8. Controleer `/api/health` (laatste definitieve jaar, varianten, versie).
+
+Lokaal de image proberen, met een eigen volume voor de database:
+
+```bash
+docker build -t ibcalculator .
+docker run --rm -p 3000:3000 -v ibcalculator-data:/app/data --env-file .env.local ibcalculator
+```
+
+`.env.local` levert `AUTH_SECRET` en `DOSSIER_KEY`. Zet daar geen `DATABASE_PATH` of `PORT` in, dan gebruikt de container `/app/data` en poort 3000. Het volume blijft bestaan tussen twee keer starten; gebruik daarom steeds dezelfde `DOSSIER_KEY`, anders zijn de dossiers erin niet meer te openen.
+
+`scripts/docker-rooktest.sh` doet dit automatisch, met wegwerpsleutels en een nieuw volume van root als `/app/data` (met `ROOKTEST_OPSLAG=map` een tijdelijke map op de host): bouwen, `/api/health` en `/dossier/setup/`, het databasebestand in de map en van `node`, migreren met tsx in de image, een account met 2FA aanmaken, en in een nieuwe container met dezelfde map (zoals bij een deploy) kijken of het account er nog is. Met `ROOKTEST_PLATFORM=linux/amd64` bouw je voor x86, zoals de server.
 
 ## Onderhoud van de jaarparameters
 

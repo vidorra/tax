@@ -72,10 +72,10 @@ describe('startBackupScheduler', () => {
     startBackupScheduler()
     await vi.advanceTimersByTimeAsync(EERSTE_TIK_MS)
     nep.tik = async () => {
-      throw Object.assign(new Error(`verbinding met postgres://ib:wachtwoord@db mislukt`), { code: 'ECONNREFUSED' })
+      throw Object.assign(new Error('disk I/O error in /app/data/ibcalculator.db (rij: geheim)'), { code: 'SQLITE_IOERR' })
     }
     await vi.advanceTimersByTimeAsync(TIK_MS)
-    expect(log.regels.slice(1)).toEqual(['Back-up: verstuurd', 'Back-up: tik mislukt (Error, ECONNREFUSED)'])
+    expect(log.regels.slice(1)).toEqual(['Back-up: verstuurd', 'Back-up: tik mislukt (Error, SQLITE_IOERR)'])
   })
 
   it('start geen tweede tik zolang de vorige nog loopt', async () => {

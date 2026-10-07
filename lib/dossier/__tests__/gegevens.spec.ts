@@ -3,14 +3,15 @@
  *
  * - Altijd: validatie en normalisatie, het lezen van wat er in de database staat, en de route-controles
  *   die vóór de opslag gebeuren (sessie, herkomst, bodylimiet, validatie).
- * - Met IB_TEST_DATABASE_URL (wegwerpcluster, zie db.integratie.spec.ts): opslaan en ontsleutelen op een
- *   echte Postgres in een eigen schema, binding van de ciphertext aan het huishouden, export en verwijderen.
+ * - Met een database (per test een eigen SQLite-bestand, zie lib/db/testdb.ts): opslaan en ontsleutelen, binding
+ *   van de ciphertext aan het huishouden, export en verwijderen.
  * Testgegevens zijn verzonnen.
  */
 import { randomBytes } from 'node:crypto'
-import { readdirSync } from 'node:fs'
-import { Client } from 'pg'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { gebruikTijdelijkeDb } from '@/lib/db/testdb'
 
 const h = vi.hoisted(() => ({ echt: false }))
 
@@ -43,6 +44,9 @@ const route = await import('@/app/api/dossier/gegevens/route')
 
 const BASIS = 'https://ib.example.nl'
 const SECRET = 'test-geheim-van-minimaal-tweeendertig-tekens-lang'
+const SLEUTEL = randomBytes(32).toString('base64')
+/** Zonder database: een plek die schrijfbaar is maar nooit wordt geopend (en nooit ./data van de werkmap). */
+const GEEN_DB = join(tmpdir(), 'ib-test-geen-db', 'ibcalculator.db')
 const ADRES = { straat: 'Voorbeeldstraat 12', postcode: '1234 AB', plaats: 'Voorbeeldstad' }
 
 function verzoek(methode: string, body?: unknown, headers: Record<string, string> = {}): Request {
@@ -62,10 +66,8 @@ let envKopie: NodeJS.ProcessEnv
 beforeEach(() => {
   envKopie = { ...process.env }
   process.env.AUTH_SECRET = SECRET
-  if (!h.echt) {
-    process.env.DATABASE_URL = 'postgres://niet-gebruikt'
-    process.env.DOSSIER_KEY = randomBytes(32).toString('base64')
-  }
+  process.env.DOSSIER_KEY = SLEUTEL
+  process.env.DATABASE_PATH = GEEN_DB
   cookieStore.clear()
   gebruikers.clear()
 })
@@ -153,48 +155,20 @@ describe('route: controles vóór de opslag', () => {
 // Echte database
 // ---------------------------------------------------------------------------
 
-const BASIS_URL = process.env.IB_TEST_DATABASE_URL?.trim()
-const SCHEMA = `ib_gegevens_${Date.now()}_${randomBytes(3).toString('hex')}`
-
-describe.skipIf(!BASIS_URL)('gegevens op een echte database', () => {
-  let url = ''
-  let beheer: Client
-  let sleutel = ''
-  const dbEnv = () => {
-    process.env.DATABASE_URL = url
-    process.env.DOSSIER_KEY = sleutel
-  }
-
-  beforeAll(async () => {
-    const u = new URL(BASIS_URL!)
-    u.searchParams.set('options', `-c search_path=${SCHEMA}`)
-    url = u.toString()
-    sleutel = randomBytes(32).toString('base64')
-    beheer = new Client({ connectionString: BASIS_URL })
-    await beheer.connect()
-    await beheer.query(`CREATE SCHEMA ${SCHEMA}`)
-    delete (globalThis as Record<string, unknown>).__ibDb
+describe('gegevens op een echte database', () => {
+  gebruikTijdelijkeDb()
+  beforeAll(() => {
     h.echt = true
-    const { migreer } = await import('@/scripts/migrate')
-    expect(await migreer(url, undefined, () => undefined)).toBe(readdirSync('migrations').filter((f) => f.endsWith('.sql')).length)
   })
-  beforeEach(dbEnv)
-
-  afterAll(async () => {
+  afterAll(() => {
     h.echt = false
-    const { getPool } = await import('@/lib/db')
-    await getPool().end().catch(() => undefined)
-    delete (globalThis as Record<string, unknown>).__ibDb
-    await beheer.query(`DROP SCHEMA IF EXISTS ${SCHEMA} CASCADE`)
-    await beheer.end()
   })
 
   async function gebruikerMetHuishouden(email: string): Promise<{ userId: number; hh: number }> {
-    dbEnv()
     const { getDb } = await import('@/lib/db')
     const { users } = await import('@/lib/db/schema')
     const { huishoudenVan } = await import('@/lib/dossier/opslag')
-    const [u] = await getDb().insert(users).values({ email, passwordHash: 'x', totpEnabled: true }).returning()
+    const u = getDb().insert(users).values({ email, passwordHash: 'x', totpEnabled: true }).returning().get()!
     return { userId: u.id, hh: await huishoudenVan(u.id) }
   }
 
@@ -214,7 +188,7 @@ describe.skipIf(!BASIS_URL)('gegevens op een echte database', () => {
     const { getDb } = await import('@/lib/db')
     const { households } = await import('@/lib/db/schema')
     const { eq } = await import('drizzle-orm')
-    const [rij] = await getDb().select().from(households).where(eq(households.id, hh))
+    const rij = getDb().select().from(households).where(eq(households.id, hh)).get()!
     expect(rij.gegevensEnc.startsWith('v2.')).toBe(true)
     for (const tekst of ['Voorbeeldstraat', '1234', 'Voorbeeldstad', 'samenwonend']) expect(rij.gegevensEnc).not.toContain(tekst)
 
@@ -248,8 +222,8 @@ describe.skipIf(!BASIS_URL)('gegevens op een echte database', () => {
     const { households } = await import('@/lib/db/schema')
     const { eq } = await import('drizzle-orm')
     const { OntsleutelFout } = await import('@/lib/crypto')
-    const [rijA] = await getDb().select().from(households).where(eq(households.id, a.hh))
-    await getDb().update(households).set({ gegevensEnc: rijA.gegevensEnc }).where(eq(households.id, b.hh))
+    const rijA = getDb().select().from(households).where(eq(households.id, a.hh)).get()!
+    getDb().update(households).set({ gegevensEnc: rijA.gegevensEnc }).where(eq(households.id, b.hh)).run()
     await expect(laadGegevens({ userId: b.userId, householdId: b.hh })).rejects.toBeInstanceOf(OntsleutelFout)
     await inloggen(b.userId)
     const fout = vi.spyOn(console, 'error').mockImplementation(() => undefined)
@@ -274,6 +248,6 @@ describe.skipIf(!BASIS_URL)('gegevens op een echte database', () => {
     const { getDb } = await import('@/lib/db')
     const { households } = await import('@/lib/db/schema')
     const { eq } = await import('drizzle-orm')
-    expect(await getDb().select().from(households).where(eq(households.userId, userId))).toHaveLength(0)
+    expect(getDb().select().from(households).where(eq(households.userId, userId)).all()).toHaveLength(0)
   })
 })

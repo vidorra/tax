@@ -1,74 +1,78 @@
 /**
  * De back-upservice als geheel.
  *
- * - Altijd: backupConfig (puur) en een controle van de broncode dat geen console-aanroep in lib/backup,
- *   lib/mail, het CLI of instrumentation.ts een adres, sleutel of token logt.
- * - Met IB_TEST_DATABASE_URL (wegwerpcluster, eigen schema): geplande tik met een nep-Resend, ontsleutelen en
- *   terugzetten in een leeg schema, tweede tik, tik buiten de termijn, mislukte mail met wachttijd, te groot,
- *   back-ups op verzoek, gelijke wachttijden in planning.ts en runs.ts, en de log zonder geheimen.
+ * - backupConfig (puur, met een nagebootste controle van de databasemap) en een controle van de broncode dat geen
+ *   console-aanroep in lib/backup, lib/mail, het CLI of instrumentation.ts een adres, sleutel of token logt.
+ * - Op een echte, tijdelijke SQLite-database: geplande tik met een nep-Resend, ontsleutelen en terugzetten in een nieuw
+ *   bestand, tweede tik, tik buiten de termijn, mislukte mail met wachttijd, te groot, back-ups op verzoek, niet
+ *   ingericht, opruimen van herstelpunten vóór de back-up, een database die niet in orde is, en de log zonder geheimen.
  */
 import { randomBytes } from 'node:crypto'
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { Client } from 'pg'
+
+import Database from 'better-sqlite3'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
+import { dossierSleutel } from '@/lib/crypto'
+import { getDb, getSqlite } from '@/lib/db'
+import { backups, herstelpunten } from '@/lib/db/schema'
+import { gebruikTijdelijkeDb } from '@/lib/db/testdb'
 import { zetResendFetch } from '@/lib/mail'
 
-import { backupConfig } from '../service'
-import {
-  GEBRUIKER_MAIL,
-  MB_TOKEN,
-  metSchema,
-  nepResend,
-  ONTVANGER,
-  RESEND_SLEUTEL,
-  tabelInhoud,
-  TOTP_GEHEIM,
-  vangLog,
-  vulDatabase,
-  zetBackupEnv,
-  type ResendVerzoek,
-} from './hulp'
+import { ontsleutelBackup, sha256Hex } from '../formaat'
+import { herstelBackup } from '../herstel'
+import { backupConfig, backupStatus, DATABASE_ONTBREEKT, geplandeTik, handmatigeBackup, maakBackupBestand } from '../service'
+import { DAG, GEBRUIKER_MAIL, MB_TOKEN, nepResend, ONTVANGER, RESEND_SLEUTEL, tabelInhoud, terug, TOTP_GEHEIM, vangLog, vulDatabase, zetBackupEnv, type ResendVerzoek } from './hulp'
 
 describe('backupConfig', () => {
   const sleutel = randomBytes(32).toString('base64')
-  const resend = { DATABASE_URL: 'postgres://ib@db/ib', DOSSIER_KEY: sleutel, BACKUP_MAIL_TO: ' jan@example.nl ', RESEND_API_KEY: 're_x', MAIL_FROM: 'noreply@example.nl' }
+  const resend = { DOSSIER_KEY: sleutel, BACKUP_MAIL_TO: ' jan@example.nl ', RESEND_API_KEY: 're_x', MAIL_FROM: 'noreply@example.nl' }
+  const ja = () => true
 
   it('klaar met Resend of met SMTP', () => {
-    expect(backupConfig(resend)).toEqual({ klaar: true, ontbreekt: [], ontvanger: 'jan@example.nl' })
+    expect(backupConfig(resend, ja)).toEqual({ klaar: true, ontbreekt: [], ontvanger: 'jan@example.nl' })
     const smtp = { ...resend, RESEND_API_KEY: undefined, SMTP_HOST: 'smtp.example.nl', SMTP_USER: 'u', SMTP_PASS: 'p' }
-    expect(backupConfig(smtp)).toEqual({ klaar: true, ontbreekt: [], ontvanger: 'jan@example.nl' })
+    expect(backupConfig(smtp, ja)).toEqual({ klaar: true, ontbreekt: [], ontvanger: 'jan@example.nl' })
   })
 
-  it('noemt alles wat ontbreekt', () => {
-    expect(backupConfig({})).toEqual({
+  it('noemt alles wat ontbreekt, ook een databasemap die niet schrijfbaar is', () => {
+    expect(backupConfig({}, () => false)).toEqual({
       klaar: false,
-      ontbreekt: ['DATABASE_URL', 'DOSSIER_KEY', 'BACKUP_MAIL_TO', 'MAIL_FROM', 'RESEND_API_KEY of SMTP_HOST, SMTP_USER en SMTP_PASS'],
+      ontbreekt: [DATABASE_ONTBREEKT, 'DOSSIER_KEY', 'BACKUP_MAIL_TO', 'MAIL_FROM', 'RESEND_API_KEY of SMTP_HOST, SMTP_USER en SMTP_PASS'],
       ontvanger: null,
     })
-    expect(backupConfig({ ...resend, SMTP_HOST: 'x', RESEND_API_KEY: '' }).ontbreekt).toEqual(['SMTP_USER', 'SMTP_PASS'])
+    expect(DATABASE_ONTBREEKT).toBe('DATABASE_PATH (map niet schrijfbaar)')
+    expect(backupConfig({ ...resend, SMTP_HOST: 'x', RESEND_API_KEY: '' }, ja).ontbreekt).toEqual(['SMTP_USER', 'SMTP_PASS'])
+  })
+
+  it('controleert de map van DATABASE_PATH uit de meegegeven omgeving', () => {
+    const gezien: string[] = []
+    backupConfig({ ...resend, DATABASE_PATH: '/srv/ib/data/ib.db' }, (pad) => (gezien.push(pad), true))
+    expect(gezien).toEqual(['/srv/ib/data/ib.db'])
+    // Zonder controle-functie: een echte map die niet bestaat onder een bestand kan niet.
+    expect(backupConfig({ ...resend, DATABASE_PATH: '/dev/null/ib.db' }).ontbreekt).toEqual([DATABASE_ONTBREEKT])
   })
 
   it('een ongeldige sleutel of een ongeldig adres telt als ontbrekend', () => {
     // Gezet maar ongeldig: de melding zegt waarom, zodat je niet denkt dat de variabele ontbreekt.
-    expect(backupConfig({ ...resend, DOSSIER_KEY: 'te-kort' }).ontbreekt).toEqual(['DOSSIER_KEY (ongeldig: 32 bytes als base64)'])
-    expect(backupConfig({ ...resend, DOSSIER_KEY: '' }).ontbreekt).toEqual(['DOSSIER_KEY'])
+    expect(backupConfig({ ...resend, DOSSIER_KEY: 'te-kort' }, ja).ontbreekt).toEqual(['DOSSIER_KEY (ongeldig: 32 bytes als base64)'])
+    expect(backupConfig({ ...resend, DOSSIER_KEY: '' }, ja).ontbreekt).toEqual(['DOSSIER_KEY'])
     for (const adres of ['Jan <jan@example.nl>', 'jan@example', 'jan@example.nl, piet@example.nl', 'jan@example.nl\nBcc: x@y.nl']) {
-      expect(backupConfig({ ...resend, BACKUP_MAIL_TO: adres })).toEqual({
+      expect(backupConfig({ ...resend, BACKUP_MAIL_TO: adres }, ja)).toEqual({
         klaar: false,
         ontbreekt: ['BACKUP_MAIL_TO (geen geldig adres: gebruik één kaal mailadres, zonder naam of komma)'],
         ontvanger: null,
       })
     }
-    expect(backupConfig({ ...resend, BACKUP_MAIL_TO: ' ' }).ontbreekt).toEqual(['BACKUP_MAIL_TO'])
+    expect(backupConfig({ ...resend, BACKUP_MAIL_TO: ' ' }, ja).ontbreekt).toEqual(['BACKUP_MAIL_TO'])
   })
 
   it('valt voor DOSSIER_KEY niet terug op process.env', () => {
     const oud = process.env.DOSSIER_KEY
     process.env.DOSSIER_KEY = sleutel
     try {
-      expect(backupConfig({ ...resend, DOSSIER_KEY: undefined }).ontbreekt).toEqual(['DOSSIER_KEY'])
+      expect(backupConfig({ ...resend, DOSSIER_KEY: undefined }, ja).ontbreekt).toEqual(['DOSSIER_KEY'])
     } finally {
       if (oud === undefined) delete process.env.DOSSIER_KEY
       else process.env.DOSSIER_KEY = oud
@@ -136,7 +140,7 @@ describe('logregels in de broncode', () => {
       'instrumentation.ts',
       'app/api/dossier/backup/route.ts',
     ]
-    const verboden = /\b(ontvanger|aan|adres|sleutel|token|wachtwoord|geheim\w*|process|env|inhoud|bestand|tekst|body|DOSSIER_KEY|RESEND_API_KEY|SMTP_PASS)\b/
+    const verboden = /\b(ontvanger|aan|adres|sleutel|token|wachtwoord|geheim\w*|process|env|inhoud|bestand|tekst|body|database|DOSSIER_KEY|RESEND_API_KEY|SMTP_PASS)\b/
     let aantal = 0
     for (const bestand of bestanden) {
       for (const arg of consoleAanroepen(readFileSync(join(wortel, bestand), 'utf8'))) {
@@ -150,64 +154,37 @@ describe('logregels in de broncode', () => {
   })
 })
 
-const BASIS_URL = process.env.IB_TEST_DATABASE_URL?.trim()
-const SCHEMA = `ib_svc_${Date.now()}_${randomBytes(3).toString('hex')}`
-const DOEL = `${SCHEMA}_doel`
-
-describe.skipIf(!BASIS_URL)('back-upservice op een echte database', () => {
-  let url = ''
+describe('back-upservice op een echte database', () => {
+  const testDb = gebruikTijdelijkeDb({ per: 'bestand' })
   let sleutel = ''
-  let beheer: Client
-  let db: Client
   let resend: ReturnType<typeof nepResend>
   let log: ReturnType<typeof vangLog>
 
-  const service = () => import('../service')
   const verzoeken = (): ResendVerzoek[] => resend.verzoeken
-  const rij = async (periode: string) =>
-    (await db.query(`SELECT soort, status, pogingen, bytes, sha256, rijen, fout FROM backups WHERE periode = $1`, [periode])).rows[0]
+  const rij = (periode: string) => getSqlite().prepare(`SELECT soort, status, pogingen, bytes, sha256, rijen, fout FROM backups WHERE periode = ?`).get(periode) as Record<string, unknown> | undefined
+  const aantalRuns = () => (getSqlite().prepare('SELECT count(*) AS n FROM backups').get() as { n: number }).n
 
-  beforeAll(async () => {
-    url = metSchema(BASIS_URL!, SCHEMA)
+  beforeAll(() => {
     sleutel = randomBytes(32).toString('base64')
-    beheer = new Client({ connectionString: BASIS_URL })
-    await beheer.connect()
-    await beheer.query(`CREATE SCHEMA ${SCHEMA}`)
-    zetBackupEnv(url, sleutel)
-    delete (globalThis as Record<string, unknown>).__ibDb
-    const { migreer } = await import('@/scripts/migrate')
-    await migreer(url, undefined, () => undefined)
-    db = new Client({ connectionString: url })
-    await db.connect()
-    await vulDatabase(db)
+    zetBackupEnv(sleutel)
+    vulDatabase()
     log = vangLog()
   })
 
   beforeEach(() => {
-    zetBackupEnv(url, sleutel)
+    zetBackupEnv(sleutel)
     resend = nepResend()
   })
   afterEach(() => zetResendFetch(null))
-
-  afterAll(async () => {
-    log?.herstel()
-    const { getPool } = await import('@/lib/db')
-    await getPool().end().catch(() => undefined)
-    delete (globalThis as Record<string, unknown>).__ibDb
-    await db?.end().catch(() => undefined)
-    await beheer.query(`DROP SCHEMA IF EXISTS ${SCHEMA} CASCADE`)
-    await beheer.query(`DROP SCHEMA IF EXISTS ${DOEL} CASCADE`)
-    await beheer.end()
-  })
+  afterAll(() => log?.herstel())
 
   it('een geplande tik op 1 februari mailt één versleutelde back-up die volledig terug te zetten is', async () => {
-    const { geplandeTik } = await service()
     const r = await geplandeTik(new Date('2027-02-01T09:00:00+01:00'))
     expect(r).toMatchObject({
       status: 'verstuurd',
       bestandsnaam: expect.stringMatching(/^ibcalculator-backup-\d{4}-\d{2}-\d{2}\.ibcbak$/),
       sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
-      rijen: { users: 1, households: 1, dossier_years: 2, snapshots: 1, accountant_docs: 1, koppelingen: 1 },
+      rijen: { users: 1, households: 1, dossier_years: 2, snapshots: 1, accountant_docs: 1, aangifte_staat: 0, herstelpunten: 0, koppelingen: 1 },
     })
     expect(verzoeken()).toHaveLength(1)
     const [v] = verzoeken()
@@ -218,72 +195,62 @@ describe.skipIf(!BASIS_URL)('back-upservice op een echte database', () => {
     expect(bijlage).toMatchObject({ filename: r.bestandsnaam, content_type: 'application/octet-stream' })
 
     // Het bestand: precies wat de run vastlegt, en niets leesbaars.
-    const { sha256Hex, ontsleutelBackup } = await import('../formaat')
     const bestand = Buffer.from(bijlage.content, 'base64')
     expect(bestand.length).toBe(r.bytes)
     expect(sha256Hex(bestand)).toBe(r.sha256)
-    for (const leesbaar of [GEBRUIKER_MAIL, TOTP_GEHEIM, 'households', 'password_hash']) expect(bestand.includes(leesbaar)).toBe(false)
-    expect(await rij('2027-02')).toEqual({ soort: 'gepland', status: 'verstuurd', pogingen: 1, bytes: r.bytes, sha256: r.sha256, rijen: r.rijen, fout: null })
+    for (const leesbaar of [GEBRUIKER_MAIL, TOTP_GEHEIM, 'households', 'password_hash', 'SQLite format']) expect(bestand.includes(leesbaar)).toBe(false)
+    expect(rij('2027-02')).toEqual({ soort: 'gepland', status: 'verstuurd', pogingen: 1, bytes: r.bytes, sha256: r.sha256, rijen: JSON.stringify(r.rijen), fout: null })
 
     // De tekst: uitleg, aantallen, SHA-256 en herstel; geen adressen, geheimen of bedragen.
     const tekst = v.body.text
-    for (const moet of ['volledige back-up', 'DOSSIER_KEY', 'bewust niet in deze mail', r.sha256!, 'npm run backup -- bekijk', 'npm run backup -- herstel', '--overschrijf', 'Versie app:  abc1234', '1 februari en 1 augustus']) {
+    for (const moet of ['volledige back-up', 'DOSSIER_KEY', 'bewust niet in deze mail', r.sha256!, 'npm run backup -- bekijk', 'npm run backup -- herstel', '--overschrijf', 'DATABASE_PATH', 'Versie app:  abc1234', '1 februari en 1 augustus']) {
       expect(tekst).toContain(moet)
     }
     expect(tekst).toMatch(/dossier_years\s+2\n/)
     for (const nooit of [GEBRUIKER_MAIL, ONTVANGER, sleutel, RESEND_SLEUTEL, TOTP_GEHEIM, MB_TOKEN, '€', '81234', '\u2014', '\u2192']) expect(tekst).not.toContain(nooit)
 
-    // Ontsleutelen met DOSSIER_KEY en terugzetten in een leeg schema geeft exact dezelfde rijen.
-    const { dossierSleutel } = await import('@/lib/crypto')
+    // Ontsleutelen met DOSSIER_KEY en terugzetten in een nieuw bestand geeft exact dezelfde rijen, zonder de administratie.
     const inhoud = ontsleutelBackup(bestand, dossierSleutel())
     expect(inhoud.migraties).toEqual(readdirSync('migrations').filter((f) => f.endsWith('.sql')).sort())
     expect(inhoud.gitSha).toBe('abc1234')
-    expect(inhoud.tabellen.map((t) => t.naam)).not.toContain('backups')
-    await beheer.query(`CREATE SCHEMA ${DOEL}`)
-    const doelUrl = metSchema(BASIS_URL!, DOEL)
-    const { migreer } = await import('@/scripts/migrate')
-    await migreer(doelUrl, undefined, () => undefined, { alleen: inhoud.migraties })
-    const { herstelDump } = await import('../dump')
-    const doel = new Client({ connectionString: doelUrl })
-    await doel.connect()
+    expect(inhoud.rijen).toEqual(r.rijen)
+    const doel = join(testDb.map, 'teruggezet', 'ibcalculator.db')
+    const h = await herstelBackup(inhoud, { doel })
+    expect(h.rijen).toEqual(r.rijen)
+    const teruggezet = new Database(doel, { readonly: true })
     try {
-      expect(await herstelDump(doel, inhoud)).toEqual(r.rijen)
-      expect(await tabelInhoud(doel)).toEqual(await tabelInhoud(db))
-      const { rows } = await doel.query(`SELECT count(*)::int AS n FROM backups`)
-      expect(rows[0].n).toBe(0)
+      expect(tabelInhoud(teruggezet, { zonderSessie: true })).toEqual(tabelInhoud(getSqlite(), { zonderSessie: true }))
+      expect(teruggezet.prepare('SELECT count(*) AS n FROM backups').get()).toEqual({ n: 0 })
     } finally {
-      await doel.end()
+      teruggezet.close()
     }
   })
 
   it('een tweede tik voor hetzelfde moment stuurt niets, ook niet binnen de inhaaltermijn', async () => {
-    const { geplandeTik } = await service()
     expect(await geplandeTik(new Date('2027-02-01T10:00:00+01:00'))).toMatchObject({ status: 'overgeslagen', reden: expect.stringContaining('1 februari 2027') })
     expect((await geplandeTik(new Date('2027-02-20T09:00:00+01:00'))).status).toBe('overgeslagen')
     expect(verzoeken()).toHaveLength(0)
-    expect((await rij('2027-02')).pogingen).toBe(1)
+    expect(rij('2027-02')?.pogingen).toBe(1)
   })
 
   it('een tik op 15 maart doet niets', async () => {
-    const { geplandeTik } = await service()
-    const voor = (await db.query(`SELECT count(*)::int AS n FROM backups`)).rows[0].n
+    const voor = aantalRuns()
     expect(await geplandeTik(new Date('2027-03-15T09:00:00+01:00'))).toEqual({
       status: 'overgeslagen',
       reden: 'Er staat nu geen back-up gepland. De volgende is op 1 augustus 2027.',
     })
     expect(verzoeken()).toHaveLength(0)
-    expect((await db.query(`SELECT count(*)::int AS n FROM backups`)).rows[0].n).toBe(voor)
+    expect(aantalRuns()).toBe(voor)
   })
 
   it('een mislukte mail geeft status mislukt; een nieuwe poging volgt pas na de wachttijd', async () => {
-    const { geplandeTik, backupStatus } = await service()
     resend.zetAntwoord(() => new Response(JSON.stringify({ message: `Domein niet geverifieerd voor ${ONTVANGER} (sleutel ${RESEND_SLEUTEL})` }), { status: 403 }))
     const r = await geplandeTik(new Date('2027-08-01T10:00:00+02:00'))
     expect(r).toMatchObject({ status: 'mislukt', reden: expect.stringMatching(/^Mailen mislukt: resend 403/) })
     expect(verzoeken()).toHaveLength(1)
-    const mislukt = await rij('2027-08')
+    const mislukt = rij('2027-08')!
     expect(mislukt).toMatchObject({ status: 'mislukt', pogingen: 1, bytes: null, sha256: null })
-    for (const tekst of [r.reden!, mislukt.fout]) {
+    for (const tekst of [r.reden!, mislukt.fout as string]) {
       expect(tekst).not.toContain(ONTVANGER)
       expect(tekst).not.toContain(RESEND_SLEUTEL)
       expect(tekst).toContain('b•••@example.nl')
@@ -298,10 +265,11 @@ describe.skipIf(!BASIS_URL)('back-upservice op een echte database', () => {
     expect(open.laatste?.fout).not.toContain(ONTVANGER)
 
     // Na de wachttijd lukt het, met poging 2.
-    await db.query(`UPDATE backups SET gestart_op = gestart_op - interval '61 minutes' WHERE periode = '2027-08'`)
+    const id = (getSqlite().prepare(`SELECT id FROM backups WHERE periode = '2027-08'`).get() as { id: number }).id
+    terug(id, 61 * 60_000)
     expect((await geplandeTik(new Date('2027-08-01T11:31:00+02:00'))).status).toBe('verstuurd')
     expect(verzoeken()).toHaveLength(2)
-    expect(await rij('2027-08')).toMatchObject({ status: 'verstuurd', pogingen: 2, fout: null })
+    expect(rij('2027-08')).toMatchObject({ status: 'verstuurd', pogingen: 2, fout: null })
 
     const daarna = await backupStatus(new Date('2027-08-02T09:00:00+02:00'))
     expect(daarna).toMatchObject({
@@ -316,28 +284,26 @@ describe.skipIf(!BASIS_URL)('back-upservice op een echte database', () => {
   })
 
   it('te groot om te mailen: geen mail, status te-groot, en de periode telt als gedaan', async () => {
-    const { geplandeTik } = await service()
     const r = await geplandeTik(new Date('2028-02-01T09:00:00+01:00'), { maxMailBytes: 64 })
     expect(r).toMatchObject({ status: 'te-groot', reden: expect.stringContaining('groter dan de mailgrens van 64 bytes'), bytes: expect.any(Number) })
     expect(r.bytes!).toBeGreaterThan(64)
     expect(verzoeken()).toHaveLength(0)
-    expect(await rij('2028-02')).toMatchObject({ status: 'te-groot', bytes: r.bytes, sha256: r.sha256, rijen: r.rijen, fout: r.reden })
+    expect(rij('2028-02')).toMatchObject({ status: 'te-groot', bytes: r.bytes, sha256: r.sha256, rijen: JSON.stringify(r.rijen), fout: r.reden })
     expect(log.regels.some((l) => l.includes('te groot om te mailen'))).toBe(true)
     expect((await geplandeTik(new Date('2028-02-02T09:00:00+01:00'))).status).toBe('overgeslagen')
     expect(verzoeken()).toHaveLength(0)
   })
 
   it('back-up op verzoek: eigen onderwerp, en geweigerd als er een loopt of bij drie per uur', async () => {
-    const { handmatigeBackup } = await service()
     const nu = new Date('2026-10-04T15:32:00+02:00')
     const r1 = await handmatigeBackup(nu)
     expect(r1).toMatchObject({ status: 'verstuurd', bestandsnaam: expect.stringMatching(/^ibcalculator-backup-\d{4}-\d{2}-\d{2}-\d{4}\.ibcbak$/) })
     expect(verzoeken()[0].body.subject).toBe('Back-up ibcalculator · op verzoek, 4 oktober 2026')
     expect(verzoeken()[0].body.text).toContain('zelf aangevraagd op 4 oktober 2026 om 15:32')
 
-    const { rows } = await db.query<{ id: number }>(`INSERT INTO backups (soort, status) VALUES ('handmatig', 'bezig') RETURNING id`)
+    const bezig = getDb().insert(backups).values({ soort: 'handmatig', status: 'bezig' }).returning().get()
     expect(await handmatigeBackup(nu)).toEqual({ geweigerd: 'bezig' })
-    await db.query(`UPDATE backups SET status = 'mislukt', afgerond_op = now() WHERE id = $1`, [rows[0].id])
+    getSqlite().prepare(`UPDATE backups SET status = 'mislukt', afgerond_op = ? WHERE id = ?`).run(new Date().toISOString(), bezig.id)
 
     expect(await handmatigeBackup(nu)).toMatchObject({ status: 'verstuurd' })
     expect(await handmatigeBackup(nu)).toEqual({ geweigerd: 'te-vaak' })
@@ -345,50 +311,56 @@ describe.skipIf(!BASIS_URL)('back-upservice op een echte database', () => {
   })
 
   it('niet ingericht: de tik slaat over en op verzoek wordt geweigerd met wat er ontbreekt', async () => {
-    const { geplandeTik, handmatigeBackup, backupStatus } = await service()
     process.env.BACKUP_MAIL_TO = 'geen-adres'
     const ongeldig = 'BACKUP_MAIL_TO (geen geldig adres: gebruik één kaal mailadres, zonder naam of komma)'
     expect(await geplandeTik(new Date('2029-02-01T09:00:00+01:00'))).toEqual({ status: 'overgeslagen', reden: `De back-up is niet ingericht (ontbreekt: ${ongeldig}).` })
     expect(await handmatigeBackup()).toEqual({ geweigerd: 'niet-ingericht', ontbreekt: [ongeldig] })
     expect(await backupStatus()).toMatchObject({ geconfigureerd: false, ontbreekt: [ongeldig], ontvanger: null })
     expect(verzoeken()).toHaveLength(0)
-    expect(await rij('2029-02')).toBeUndefined()
+    expect(rij('2029-02')).toBeUndefined()
   })
 
-  it('wachttijdUren en de SQL in claimGepland geven voor pogingen 1 tot en met 10 dezelfde wachttijd', async () => {
-    const { claimGepland } = await import('../runs')
-    const { wachttijdUren } = await import('../planning')
-    const eerste = await claimGepland('2031-02')
-    expect(eerste).toEqual({ id: expect.any(Number), poging: 1 })
-    const id = eerste!.id
-    for (let p = 1; p <= 10; p++) {
-      const minuten = wachttijdUren(p) * 60
-      await db.query(`UPDATE backups SET status = 'mislukt', pogingen = $2, gestart_op = now() - make_interval(mins => $3::int) WHERE id = $1`, [id, p, minuten - 1])
-      expect(await claimGepland('2031-02'), `na poging ${p}, een minuut voor ${wachttijdUren(p)} uur`).toBeNull()
-      await db.query(`UPDATE backups SET gestart_op = now() - make_interval(mins => $2::int) WHERE id = $1`, [id, minuten + 1])
-      expect(await claimGepland('2031-02'), `na poging ${p}, een minuut na ${wachttijdUren(p)} uur`).toEqual({ id, poging: p + 1 })
-    }
-    expect(Array.from({ length: 10 }, (_, i) => wachttijdUren(i + 1))).toEqual([1, 2, 4, 8, 16, 24, 24, 24, 24, 24])
-  })
-
-  it('een herstelpunt van de JSON-import ouder dan 30 dagen gaat vóór de dump weg; een nieuwer blijft', async () => {
-    const { rows } = await db.query<{ id: number }>(`SELECT id FROM households ORDER BY id LIMIT 1`)
-    const hh = rows[0].id
-    await db.query(`INSERT INTO herstelpunten (household_id, sleutel, reden, inhoud_enc, aangemaakt) VALUES ($1, 'svc-oud', 'json-import', 'x', now() - interval '45 days'), ($1, 'svc-nieuw', 'json-import', 'x', now() - interval '2 days')`, [hh])
+  it('een herstelpunt van de JSON-import ouder dan 30 dagen gaat vóór de back-up weg; een nieuwer blijft', async () => {
+    const hh = (getSqlite().prepare('SELECT id FROM households ORDER BY id LIMIT 1').get() as { id: number }).id
+    getDb()
+      .insert(herstelpunten)
+      .values([
+        { householdId: hh, sleutel: 'svc-oud', reden: 'json-import', inhoudEnc: 'x', aangemaakt: new Date(Date.now() - 45 * DAG) },
+        { householdId: hh, sleutel: 'svc-nieuw', reden: 'json-import', inhoudEnc: 'x', aangemaakt: new Date(Date.now() - 2 * DAG) },
+      ])
+      .run()
     try {
-      const { maakBackupBestand } = await service()
       const b = await maakBackupBestand('handmatig')
       expect(b.rijen.herstelpunten).toBe(1)
-      const over = await db.query<{ sleutel: string }>(`SELECT sleutel FROM herstelpunten WHERE sleutel LIKE 'svc-%'`)
-      expect(over.rows.map((r) => r.sleutel)).toEqual(['svc-nieuw'])
+      expect(getSqlite().prepare(`SELECT sleutel FROM herstelpunten WHERE sleutel LIKE 'svc-%'`).all()).toEqual([{ sleutel: 'svc-nieuw' }])
+      const inhoud = ontsleutelBackup(b.bestand, dossierSleutel())
+      expect(inhoud.database.includes('svc-oud')).toBe(false)
     } finally {
-      await db.query(`DELETE FROM herstelpunten WHERE sleutel LIKE 'svc-%'`)
+      getSqlite().exec(`DELETE FROM herstelpunten WHERE sleutel LIKE 'svc-%'`)
+    }
+  })
+
+  it('een database die niet in orde is: run mislukt met een duidelijke reden, zonder inhoud', async () => {
+    // De back-ups op verzoek van hierboven tellen anders mee voor de grens van drie per uur.
+    getSqlite().exec(`DELETE FROM backups WHERE soort = 'handmatig'`)
+    getSqlite().pragma('foreign_keys = OFF')
+    const db = getSqlite()
+    const { n } = db.prepare('SELECT max(id) + 1000 AS n FROM households').get() as { n: number }
+    db.prepare(`INSERT INTO dossier_years (household_id, jaar, invoer_enc) VALUES (?, 2030, 'x')`).run(n)
+    getSqlite().pragma('foreign_keys = ON')
+    try {
+      const r = await handmatigeBackup(new Date())
+      expect(r).toMatchObject({ status: 'mislukt', reden: expect.stringContaining('De database is niet in orde') })
+      expect((r as { reden: string }).reden).toContain('dossier_years')
+      expect(verzoeken()).toHaveLength(0)
+    } finally {
+      getSqlite().exec(`DELETE FROM dossier_years WHERE jaar = 2030`)
     }
   })
 
   it('niets in de log bevat een volledig adres, een sleutel, een token of inhoud van rijen', () => {
     expect(log.regels.length).toBeGreaterThan(0)
     const alles = log.regels.join('\n')
-    for (const nooit of [ONTVANGER, GEBRUIKER_MAIL, sleutel, RESEND_SLEUTEL, TOTP_GEHEIM, MB_TOKEN, 'noreply@example.nl']) expect(alles).not.toContain(nooit)
+    for (const nooit of [ONTVANGER, GEBRUIKER_MAIL, sleutel, RESEND_SLEUTEL, TOTP_GEHEIM, MB_TOKEN, 'noreply@example.nl', testDb.pad]) expect(alles).not.toContain(nooit)
   })
 })

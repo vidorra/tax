@@ -3,6 +3,7 @@
  * De middleware stuurt al door naar de login; dit is de tweede controle (ook op de database).
  */
 import { redirect } from 'next/navigation'
+import { databaseFoutMelding } from '@/lib/auth/api'
 import { configStatus } from '@/lib/auth/config'
 import { gebruikerOpId } from '@/lib/auth/gebruiker'
 import { getSessie, sessieNogGeldig } from '@/lib/auth/server'
@@ -14,12 +15,10 @@ export type PaginaContext =
   | { soort: 'fout'; melding: string }
   | { soort: 'ok'; userId: number; householdId: number }
 
+/** Melding voor de pagina bij een fout uit de database of het ontsleutelen; nooit inhoud van rijen. */
 export function databaseMelding(e: unknown): string {
-  const code = (e as { code?: string })?.code ?? (e as { cause?: { code?: string } })?.cause?.code
-  if (code === '42P01') return 'De databasetabellen bestaan nog niet.'
-  if (code === 'ECONNREFUSED' || code === 'ENOTFOUND' || code === '28P01' || code === '3D000') return 'De database is niet bereikbaar. Controleer DATABASE_URL.'
   if ((e as Error)?.name === 'OntsleutelFout') return 'De opgeslagen gegevens konden niet worden ontsleuteld. Controleer of DOSSIER_KEY klopt.'
-  return 'Er ging iets mis bij het laden van het dossier.'
+  return databaseFoutMelding(e) ?? 'Er ging iets mis bij het laden van het dossier.'
 }
 
 export async function paginaContext(): Promise<PaginaContext> {

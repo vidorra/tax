@@ -69,9 +69,10 @@ const nextConfig = {
   trailingSlash: true,
   compress: true,
   poweredByHeader: false,
-  // nodemailer (alleen het SMTP-pad van de back-upmail) niet bundelen maar uit node_modules laden,
-  // zodat de server dezelfde code draait als de tests.
-  serverExternalPackages: ['nodemailer'],
+  // Niet bundelen maar uit node_modules laden. better-sqlite3 is een native module (een .node-bestand dat de
+  // bundler niet kan meenemen); nodemailer (alleen het SMTP-pad van de back-upmail) zodat de server dezelfde
+  // code draait als de tests.
+  serverExternalPackages: ['better-sqlite3', 'nodemailer'],
   experimental: {
     optimizePackageImports: ['lucide-react'],
   },

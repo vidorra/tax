@@ -1,8 +1,9 @@
 /**
  * Scheduler van de geplande back-up. Start één keer per proces (instrumentation.ts): de eerste tik na een
  * minuut, daarna elk uur. Elke tik vraagt geplandeTik of er iets te doen is; meestal is het antwoord
- * 'overgeslagen' en dat logt hij niet. Twee servers of een herstart midden in een tik geven geen dubbele
- * mail, want claimGepland in runs.ts is atomair.
+ * 'overgeslagen' en dat logt hij niet. Een tweede proces (de CLI, een tweede container tijdens een deploy) of
+ * een herstart midden in een tik geeft geen dubbele mail, want claimGepland in runs.ts claimt met de
+ * schrijflock van SQLite (BEGIN IMMEDIATE).
  *
  * De timers houden het proces niet in leven (unref). Logt alleen de uitkomststatus, nooit het volledige adres.
  */
@@ -41,7 +42,7 @@ export function startBackupScheduler(): void {
 
   let bezig = false
   const tik = async (): Promise<void> => {
-    // Een tik die nog loopt (grote dump, trage mailserver) krijgt geen tweede ernaast.
+    // Een tik die nog loopt (grote database, trage mailserver) krijgt geen tweede ernaast.
     if (bezig) return
     bezig = true
     try {

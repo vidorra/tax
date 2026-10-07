@@ -3,14 +3,16 @@
  * de controles in laadJaar en lijstJaren (badge bij de tab Invoer, jaarkaart).
  *
  * - Zonder database: de telling en de badge op de pure delen (controle-telling.ts, jaar-tabs.ts).
- * - Met IB_TEST_DATABASE_URL (eigen schema per bestand): (a) Gecontroleerd met een open fout geeft 200, status Concept
+ * - Met een database (per test een eigen SQLite-bestand, zie lib/db/testdb.ts): (a) Gecontroleerd met een open fout geeft 200, status Concept
  *   en een melding met de titel; (b) dezelfde fout met een geldige negering: Gecontroleerd; (c) Ingediend met een open
  *   fout: Ingediend, ingediend_op gezet; (d) daarna gewijzigde invoer met Ingediend: blijft Ingediend,
  *   gewijzigd_na_indienen, ingediend-gewijzigd in de controles; (e) een negering met ernst let-op voor een fout telt niet.
  */
 import { randomBytes } from 'node:crypto'
-import { Client } from 'pg'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { gebruikTijdelijkeDb } from '@/lib/db/testdb'
 import type { HuishoudenInvoer } from '@/lib/tax/types'
 import type { GenegeerdeControle } from '@/lib/controles/types'
 import { jaarBadges } from '../jaar-tabs'
@@ -46,6 +48,9 @@ const { maakToken, SESSIE_COOKIE } = await import('@/lib/auth/sessie')
 const route = await import('@/app/api/dossier/jaren/[jaar]/route')
 
 const SECRET = 'test-geheim-van-minimaal-tweeendertig-tekens-lang'
+const SLEUTEL = randomBytes(32).toString('base64')
+/** Zonder database: een plek die schrijfbaar is maar nooit wordt geopend (en nooit ./data van de werkmap). */
+const GEEN_DB = join(tmpdir(), 'ib-test-geen-db', 'ibcalculator.db')
 const KV = 'kapitaalsvergelijking:A:ond-1'
 
 function verzoek(jaar: string, body: unknown): [Request, { params: Promise<{ jaar: string }> }] {
@@ -71,10 +76,8 @@ let envKopie: NodeJS.ProcessEnv
 beforeEach(() => {
   envKopie = { ...process.env }
   process.env.AUTH_SECRET = SECRET
-  if (!h.echt) {
-    process.env.DATABASE_URL = 'postgres://niet-gebruikt'
-    process.env.DOSSIER_KEY = randomBytes(32).toString('base64')
-  }
+  process.env.DOSSIER_KEY = SLEUTEL
+  process.env.DATABASE_PATH = GEEN_DB
   cookieStore.clear()
   gebruikers.clear()
 })
@@ -116,48 +119,20 @@ describe('telling en badge (zonder database)', () => {
   })
 })
 
-const BASIS_URL = process.env.IB_TEST_DATABASE_URL?.trim()
-const SCHEMA = `ib_r2_a3_status_${Date.now()}_${randomBytes(3).toString('hex')}`
-
-describe.skipIf(!BASIS_URL)('statusregel op een echte database', () => {
-  let url = ''
-  let beheer: Client
-  let sleutel = ''
-  const dbEnv = () => {
-    process.env.DATABASE_URL = url
-    process.env.DOSSIER_KEY = sleutel
-  }
-
-  beforeAll(async () => {
-    const u = new URL(BASIS_URL!)
-    u.searchParams.set('options', `-c search_path=${SCHEMA}`)
-    url = u.toString()
-    sleutel = randomBytes(32).toString('base64')
-    beheer = new Client({ connectionString: BASIS_URL })
-    await beheer.connect()
-    await beheer.query(`CREATE SCHEMA ${SCHEMA}`)
-    delete (globalThis as Record<string, unknown>).__ibDb
+describe('statusregel op een echte database', () => {
+  gebruikTijdelijkeDb()
+  beforeAll(() => {
     h.echt = true
-    dbEnv()
-    const { migreer } = await import('@/scripts/migrate')
-    await migreer(url, undefined, () => undefined)
   })
-  beforeEach(dbEnv)
-
-  afterAll(async () => {
+  afterAll(() => {
     h.echt = false
-    const { getPool } = await import('@/lib/db')
-    await getPool().end().catch(() => undefined)
-    delete (globalThis as Record<string, unknown>).__ibDb
-    await beheer.query(`DROP SCHEMA IF EXISTS ${SCHEMA} CASCADE`)
-    await beheer.end()
   })
 
   async function gebruikerMetHuishouden(email: string): Promise<{ userId: number; hh: number }> {
     const { getDb } = await import('@/lib/db')
     const { users } = await import('@/lib/db/schema')
     const { huishoudenVan } = await import('@/lib/dossier/opslag')
-    const [u] = await getDb().insert(users).values({ email, passwordHash: 'x', totpEnabled: true }).returning()
+    const u = getDb().insert(users).values({ email, passwordHash: 'x', totpEnabled: true }).returning().get()!
     return { userId: u.id, hh: await huishoudenVan(u.id) }
   }
 

@@ -1,16 +1,19 @@
 /**
  * API-route /api/dossier/backup (GET status, POST nu mailen).
  *
- * - Altijd: sessie (401), herkomst (403), dossier niet ingericht (503) en back-up niet ingericht (503 met
- *   ontbreekt), zonder database.
- * - Met IB_TEST_DATABASE_URL: status, mailen via een nep-Resend, 409 als er een loopt en 429 met
+ * - Zonder database: sessie (401), herkomst (403), dossier niet ingericht (503) en back-up niet ingericht (503 met
+ *   ontbreekt).
+ * - Op een tijdelijke SQLite-database: status, mailen via een nep-Resend, 409 als er een loopt en 429 met
  *   Retry-After na drie per uur. Het volledige adres komt in geen enkele response voor.
  */
 import { randomBytes } from 'node:crypto'
-import { Client } from 'pg'
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { metSchema, nepResend, ONTVANGER, RESEND_SLEUTEL, vulDatabase, zetBackupEnv } from './hulp'
+import { getDb, getSqlite } from '@/lib/db'
+import { backups } from '@/lib/db/schema'
+import { gebruikTijdelijkeDb } from '@/lib/db/testdb'
+
+import { nepResend, ONTVANGER, RESEND_SLEUTEL, vulDatabase, zetBackupEnv } from './hulp'
 
 type Opties = { httpOnly?: boolean; path?: string; maxAge?: number }
 const cookieStore = new Map<string, { value: string; opties: Opties }>()
@@ -61,7 +64,7 @@ async function lees(res: Response): Promise<{ status: number; tekst: string; dat
 let envKopie: NodeJS.ProcessEnv
 beforeEach(() => {
   envKopie = { ...process.env }
-  zetBackupEnv('postgres://niet-gebruikt', randomBytes(32).toString('base64'))
+  zetBackupEnv(randomBytes(32).toString('base64'))
   process.env.AUTH_SECRET = SECRET
   cookieStore.clear()
   gebruikers.clear()
@@ -99,38 +102,15 @@ describe('controles vóór de back-up', () => {
   })
 })
 
-const BASIS_URL = process.env.IB_TEST_DATABASE_URL?.trim()
-const SCHEMA = `ib_bkroute_${Date.now()}_${randomBytes(3).toString('hex')}`
-
-describe.skipIf(!BASIS_URL)('route op een echte database', () => {
-  let url = ''
+describe('route op een echte database', () => {
+  gebruikTijdelijkeDb()
   let sleutel = ''
-  let beheer: Client
-  let db: Client
 
-  beforeAll(async () => {
-    url = metSchema(BASIS_URL!, SCHEMA)
+  beforeEach(() => {
     sleutel = randomBytes(32).toString('base64')
-    beheer = new Client({ connectionString: BASIS_URL })
-    await beheer.connect()
-    await beheer.query(`CREATE SCHEMA ${SCHEMA}`)
-    zetBackupEnv(url, sleutel)
-    delete (globalThis as Record<string, unknown>).__ibDb
-    const { migreer } = await import('@/scripts/migrate')
-    await migreer(url, undefined, () => undefined)
-    db = new Client({ connectionString: url })
-    await db.connect()
-    await vulDatabase(db)
-  })
-  beforeEach(() => zetBackupEnv(url, sleutel))
-
-  afterAll(async () => {
-    const { getPool } = await import('@/lib/db')
-    await getPool().end().catch(() => undefined)
-    delete (globalThis as Record<string, unknown>).__ibDb
-    await db?.end().catch(() => undefined)
-    await beheer.query(`DROP SCHEMA IF EXISTS ${SCHEMA} CASCADE`)
-    await beheer.end()
+    zetBackupEnv(sleutel)
+    process.env.AUTH_SECRET = SECRET
+    vulDatabase()
   })
 
   it('GET status, POST mailt, daarna 409 als er een loopt en 429 na drie per uur', async () => {
@@ -161,10 +141,10 @@ describe.skipIf(!BASIS_URL)('route op een echte database', () => {
     expect(mislukt.data.resultaat).toMatchObject({ status: 'mislukt', reden: expect.stringContaining('resend 401') })
 
     // Er loopt er een: 409.
-    const { rows } = await db.query<{ id: number }>(`INSERT INTO backups (soort, periode, status) VALUES ('gepland', '2030-02', 'bezig') RETURNING id`)
+    const gepland = getDb().insert(backups).values({ soort: 'gepland', periode: '2030-02', status: 'bezig' }).returning().get()
     const bezig = await lees(await route.POST(verzoek('POST')))
     expect(bezig.status).toBe(409)
-    await db.query(`UPDATE backups SET status = 'verstuurd', afgerond_op = now() WHERE id = $1`, [rows[0].id])
+    getSqlite().prepare(`UPDATE backups SET status = 'verstuurd', afgerond_op = ? WHERE id = ?`).run(new Date().toISOString(), gepland.id)
 
     // Derde op verzoek binnen het uur lukt nog, de vierde krijgt 429 met Retry-After.
     nep.zetAntwoord(() => new Response(JSON.stringify({ id: 're_3' }), { status: 200 }))

@@ -32,7 +32,8 @@ export async function POST(req: Request) {
       return fout(401, 'Deze code klopt niet. Controleer de tijd op je telefoon en probeer de volgende code.')
     }
     limiet.reset(sleutel)
-    await activeerTotp(gebruiker.id)
+    // Ondeelbaar: lukt alleen als dit account nog bestaat en niemand de installatie intussen heeft afgerond.
+    if (!(await activeerTotp(gebruiker.id))) return fout(401, 'De installatie is verlopen. Begin opnieuw.')
     await wisCookie(SETUP_COOKIE)
     await zetSessie(gebruiker.id, gebruiker.sessieGeneratie)
     return json({ ok: true })

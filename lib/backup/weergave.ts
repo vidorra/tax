@@ -28,3 +28,14 @@ export function momentenNL(momenten: readonly string[]): string {
   if (namen.length <= 1) return namen.join('')
   return `${namen.slice(0, -1).join(', ')} en ${namen[namen.length - 1]}`
 }
+
+/** Rijen per tabel als uitgelijnde regels, met een totaal eronder. Alleen namen en aantallen. */
+export function rijenRegels(rijen: Record<string, number>): string[] {
+  const namen = Object.keys(rijen)
+  const breedte = Math.max(6, ...namen.map((n) => n.length))
+  const totaal = namen.reduce((s, n) => s + rijen[n], 0)
+  return [
+    ...namen.map((n) => `  ${n.padEnd(breedte)}  ${rijen[n].toLocaleString('nl-NL')}`),
+    `  ${'totaal'.padEnd(breedte)}  ${totaal.toLocaleString('nl-NL')} rijen in ${namen.length} tabellen`,
+  ]
+}

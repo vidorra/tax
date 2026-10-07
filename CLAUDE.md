@@ -30,6 +30,13 @@ IB-aangiftetool voor zzp-huishoudens. Het plan (versie 2) staat buiten deze repo
 - Tests met een database gebruiken `gebruikTijdelijkeDb()` uit `lib/db/testdb.ts`: een eigen, gemigreerd bestand per test. Ze draaien altijd.
 - Fouten van de database vertaal je met `dbFoutSoort(e)`; nooit inhoud van rijen in een melding of log.
 
+## Deploy (`Dockerfile`, `start.sh`)
+
+- Image op node:20-alpine. De builder heeft de bouwtools voor better-sqlite3 en geeft na `npm prune --omit=dev` zijn `node_modules` aan de runner, die dus niets bouwt. Native modules staan in `serverExternalPackages` (`next.config.js`).
+- `tsx` staat in `dependencies`: `start.sh` (migraties) en `scripts/backup.ts` draaien ermee in de container.
+- `start.sh` start als root, geeft de map van `DATABASE_PATH` (`/app/data`) aan `node`, en draait daarna alles als `node`: eerst `scripts/migrate.ts`, dan de server (ook als migreren mislukt). Scripts in de container met `docker exec -u node`.
+- Geen gegevens in de image: `.dockerignore` sluit `data/`, `*.db*`, back-ups, `.env*` en `prive/` uit.
+
 ## UI
 
 - Kaarten `bg-white rounded-2xl border border-gray-200 shadow-sm`, chips voor keuzes, live herberekening, sticky resultaatpaneel op desktop, vaste balk onderin op mobiel. Geen wizards.
