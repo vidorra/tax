@@ -38,6 +38,9 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          # Het GITHUB_TOKEN niet in .git/config laten staan terwijl npm ci installscripts draait.
+          persist-credentials: false
 
       - name: Use Node.js 20
         uses: actions/setup-node@v4
@@ -66,9 +69,8 @@ jobs:
           npm run build
         env:
           NEXT_PUBLIC_SITE_URL: ${{ env.SITE_URL }}
-          # Optioneel, ook vast bij het bouwen. Zonder deze repositoryvariabelen draait de site zonder statistiek.
-          NEXT_PUBLIC_UMAMI_WEBSITE_ID: ${{ vars.NEXT_PUBLIC_UMAMI_WEBSITE_ID }}
-          NEXT_PUBLIC_UMAMI_SRC: ${{ vars.NEXT_PUBLIC_UMAMI_SRC }}
+          # Geen statistiek: NEXT_PUBLIC_UMAMI_* zijn niet gezet. Wil je dat later wel, zet ze dan hier vast
+          # (ze komen bij het bouwen in de pagina's; in CapRover zetten heeft geen effect).
 
       - name: Create deploy.tar
         run: GIT_SHA="${GITHUB_SHA::7}" bash scripts/deploy-tarball.sh deploy.tar

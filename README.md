@@ -55,7 +55,7 @@ De database is één SQLite-bestand, zonder aparte databaseserver: lokaal `./dat
 | `AUTH_SECRET` | dossier | Minimaal 32 tekens, willekeurig |
 | `DOSSIER_KEY` | dossier | 32 bytes als base64 (`node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`) |
 | `TRUSTED_PROXY_HOPS` | rate limits | Standaard 1 (één reverse proxy, zoals de nginx van CapRover); 2 met Cloudflare ervoor |
-| `NEXT_PUBLIC_UMAMI_WEBSITE_ID`, `NEXT_PUBLIC_UMAMI_SRC` | statistiek | Optioneel, cookieless. Ook vast bij het bouwen: voor de server als repositoryvariabelen in GitHub (de workflow geeft ze aan `next build`), niet in CapRover. `NEXT_PUBLIC_UMAMI_SRC` is de URL van het script op je eigen Umami-server (bijvoorbeeld `https://stats.example.nl/script.js`), de CSP staat die host toe. Ontbreekt een van de twee, dan geen statistiek |
+| `NEXT_PUBLIC_UMAMI_WEBSITE_ID`, `NEXT_PUBLIC_UMAMI_SRC` | statistiek | Staat uit. Wil je cookieless statistiek met Umami, zet deze twee dan als vaste waarden in `.github/workflows/deploy.yml` bij de stap Build (ze komen bij het bouwen in de pagina's; in CapRover zetten heeft geen effect). De CSP staat dan de host uit `NEXT_PUBLIC_UMAMI_SRC` toe |
 | `GIT_SHA` | `/api/health` | Optioneel. Bij een deploy zet de workflow hem in `.env.production` in de tarball |
 | `MONEYBIRD_TOKEN`, `MONEYBIRD_ADMINISTRATION_ID` | Moneybird-koppeling | Optioneel; een koppeling uit de omgeving (id `env`) naast de koppelingen die je in het dossier toevoegt |
 | `BACKUP_MAIL_TO` | back-up | Eén mailadres dat op 1 februari en 1 augustus de versleutelde back-up krijgt |
