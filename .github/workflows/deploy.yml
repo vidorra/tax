@@ -26,7 +26,7 @@ env:
   # De publieke URL van de site. next build zet hem vast in de pagina's (canonical, sitemap, robots, JSON-LD), dus in
   # CapRover zetten heeft geen effect. Wijzigen: pas de URL hieronder aan en push naar main. Een repositoryvariabele
   # NEXT_PUBLIC_SITE_URL gaat voor als je die ooit zet, maar nodig is hij niet.
-  SITE_URL: ${{ vars.NEXT_PUBLIC_SITE_URL || 'https://ibcalculator.server.devjens.nl' }}
+  SITE_URL: ${{ vars.NEXT_PUBLIC_SITE_URL || 'https://tax.server.devjens.nl' }}
 
 jobs:
   build-and-deploy:
