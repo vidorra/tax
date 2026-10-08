@@ -188,7 +188,7 @@ Een push naar `main` test de app, controleert de image en deployt hem. Alles geb
 
 Bij een pull request naar `main` draaien stap 1 tot en met 4 wel, de deploy niet. Docker op je eigen computer is niet nodig.
 
-**De site-URL** staat op één plek: `SITE_URL` bovenin `.github/workflows/deploy.yml`, nu `https://ibcalculator.server.devjens.nl`. `next build` zet hem vast in de pagina's (canonical, sitemap, robots, JSON-LD), dus in CapRover heeft hij geen effect. Wijzigen: pas de URL daar aan en push naar `main`. Een repositoryvariabele `NEXT_PUBLIC_SITE_URL` gaat voor als je die ooit zet, maar nodig is hij niet.
+**De site-URL** staat op één plek: `SITE_URL` bovenin `.github/workflows/deploy.yml`, nu `https://tax.server.devjens.nl`. `next build` zet hem vast in de pagina's (canonical, sitemap, robots, JSON-LD), dus in CapRover heeft hij geen effect. Wijzigen: pas de URL daar aan en push naar `main`. Een repositoryvariabele `NEXT_PUBLIC_SITE_URL` gaat voor als je die ooit zet, maar nodig is hij niet.
 
 **GitHub** heeft alleen drie secrets (Settings, Secrets and variables, Actions): `CAPROVER_SERVER` (bijvoorbeeld `https://captain.example.nl`), `APP_NAME` (de naam van de app in CapRover) en `APP_TOKEN` (in CapRover bij de app onder Deployment: Enable App Token). Zonder die secrets draaien test, build en rooktest wel en slaat de workflow de deploy over, met een melding.
 
