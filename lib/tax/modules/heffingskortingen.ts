@@ -10,9 +10,12 @@
  *   jaar tot het huishouden hoort (co-ouderschap: ten minste `coOuderMinDagen` dagen). Er is géén
  *   geboortedatumgrens (amendement Grinwis, Kamerstuk 36418 nr. 61).
  * - Ouderenkorting alleen bij AOW-leeftijd; jonggehandicaptenkorting nooit automatisch.
- * - Alle kortingen via AFRONDING.korting; verzilverd = min(bruto, maxVerzilverbaar).
+ * - Afronding per korting (Kennisgroep Belastingdienst KG:202:2022:14): de korting wordt ongerond berekend en gesplitst
+ *   in een belastingdeel en een premiedeel (AOW, Anw en Wlz samen) naar de tarieven van schijf 1. Beide delen worden
+ *   afgerond in het voordeel van de belastingplichtige (AFRONDING.heffingskortingDeel, naar boven); de korting is de
+ *   som, nooit hoger dan het maximum in de wet. Verzilverd = min(bruto, maxVerzilverbaar).
  *
- * Controle 2026 (alleenstaand, arbeidsinkomen 76.000, box 1-inkomen 64.000): AHK 923, AK 3.705.
+ * Controle 2026 (alleenstaand, arbeidsinkomen 76.000, box 1-inkomen 64.000): AHK 210 + 714 = 924, AK 840 + 2.866 = 3.706.
  */
 import type { ArbeidskortingParams, HeffingskortingSoort, HeffingskortingenResultaat, KindInvoer, TaxYearParams, Uitlegregel, Waarschuwing } from '../types'
 import { AFRONDING } from '../rounding'
@@ -101,10 +104,46 @@ function toetsKind(kind: KindInvoer, ctx: HeffingskortingenContext): KindToets {
   }
 }
 
+type KortingDeel = NonNullable<HeffingskortingenResultaat['delen']>[number]
+
+/** Volgorde van de kortingen in `delen` (zo staan ze in het rapport). */
+const SOORTEN: HeffingskortingSoort[] = ['algemeen', 'arbeid', 'iack', 'ouderen', 'jonggehandicapt', 'groenBeleggen']
+
+/** Aandeel van het belastingdeel in het tarief van schijf 1 (zonder AOW-premie als de AOW-leeftijd is bereikt). */
+export function belastingdeelFractie(ctx: Pick<HeffingskortingenContext, 'params' | 'aowBereikt'>): number {
+  const b1 = ctx.params.box1.waarde
+  const belastingDeel = b1.schijven[0]?.belastingDeel ?? 0
+  const premiePct = (ctx.aowBereikt ? 0 : b1.premies.aow) + b1.premies.anw + b1.premies.wlz
+  const totaalPct = belastingDeel + premiePct
+  return totaalPct > 0 ? belastingDeel / totaalPct : 1
+}
+
+/**
+ * Rondt een ongeronde korting af zoals de Belastingdienst (KG:202:2022:14): belastingdeel en premiedeel elk naar boven,
+ * de korting is de som en nooit hoger dan `maximum` (het bedrag in de wet). Valt de som erboven, dan is het premiedeel
+ * de rest. Voorbeeld met verzonnen getallen: 1.000,30 met een belastingaandeel van 25% geeft 250,08 en 750,22, dus
+ * 251 + 751 = 1.002.
+ */
+export function rondKorting(soort: HeffingskortingSoort, ruw: number, maximum: number, fractie: number): KortingDeel {
+  if (!(ruw > 0)) return { soort, totaal: 0, belastingdeel: 0, premiedeel: 0 }
+  const belastingdeel = AFRONDING.heffingskortingDeel(ruw * fractie)
+  const premiedeel = AFRONDING.heffingskortingDeel(ruw * (1 - fractie))
+  const totaal = Math.min(belastingdeel + premiedeel, Math.max(0, maximum))
+  const belasting = Math.min(belastingdeel, totaal)
+  return { soort, totaal, belastingdeel: belasting, premiedeel: totaal - belasting }
+}
+
 export function berekenHeffingskortingen(ctx: HeffingskortingenContext): HeffingskortingenResultaat {
   const hk = ctx.params.heffingskortingen.waarde
   const uitleg: Uitlegregel[] = []
   const waarschuwingen: Waarschuwing[] = []
+  const fractie = belastingdeelFractie(ctx)
+  const delen: Partial<Record<HeffingskortingSoort, KortingDeel>> = {}
+  const rond = (soort: HeffingskortingSoort, ruw: number, maximum: number): number => {
+    const d = rondKorting(soort, ruw, maximum, fractie)
+    delen[soort] = d
+    return d.totaal
+  }
 
   // Algemene heffingskorting.
   const a = hk.algemeen
@@ -112,7 +151,7 @@ export function berekenHeffingskortingen(ctx: HeffingskortingenContext): Heffing
   const ahkMax = ctx.aowBereikt ? a.aowMax : a.max
   const ahkPct = ctx.aowBereikt ? a.aowAfbouwPct : a.afbouwPct
   const ahkAfbouw = ahkPct * Math.max(0, ahkGrondslag - a.afbouwVanaf)
-  const algemeen = AFRONDING.korting(Math.max(0, ahkMax - ahkAfbouw))
+  const algemeen = rond('algemeen', Math.max(0, ahkMax - ahkAfbouw), ahkMax)
   uitleg.push(
     regel('hk-algemeen', 'Algemene heffingskorting', algemeen, 'min', {
       formule:
@@ -134,7 +173,7 @@ export function berekenHeffingskortingen(ctx: HeffingskortingenContext): Heffing
   // Arbeidskorting.
   const akParams = ctx.aowBereikt ? hk.arbeidAow : hk.arbeid
   const ak = arbeidskortingBruto(ctx.arbeidsinkomen, akParams)
-  const arbeid = AFRONDING.korting(ak.bedrag)
+  const arbeid = rond('arbeid', ak.bedrag, akParams.max)
   uitleg.push(
     regel('hk-arbeid', 'Arbeidskorting', arbeid, 'min', {
       formule: ak.formule,
@@ -175,7 +214,7 @@ export function berekenHeffingskortingen(ctx: HeffingskortingenContext): Heffing
         }),
       )
     } else {
-      iack = AFRONDING.korting(Math.min(ip.max, ip.pct * (ctx.arbeidsinkomen - ip.drempel)))
+      iack = rond('iack', Math.min(ip.max, ip.pct * (ctx.arbeidsinkomen - ip.drempel)), ip.max)
       uitleg.push(
         regel('hk-iack', 'Inkomensafhankelijke combinatiekorting', iack, 'min', {
           formule: `min(${eur(ip.max)}, ${pct(ip.pct)} × (${eur(ctx.arbeidsinkomen)} − ${eur(ip.drempel)}))`,
@@ -192,7 +231,7 @@ export function berekenHeffingskortingen(ctx: HeffingskortingenContext): Heffing
     const o = hk.ouderen
     const basis = Math.max(0, o.max - o.afbouwPct * Math.max(0, ctx.verzamelinkomen - o.grens))
     const alleenstaand = ctx.heeftFiscaalPartner ? 0 : o.alleenstaand
-    ouderen = AFRONDING.korting(basis + alleenstaand)
+    ouderen = rond('ouderen', basis + alleenstaand, o.max + alleenstaand)
     uitleg.push(
       regel('hk-ouderen', 'Ouderenkorting', ouderen, 'min', {
         formule:
@@ -204,7 +243,7 @@ export function berekenHeffingskortingen(ctx: HeffingskortingenContext): Heffing
   }
 
   // Jonggehandicaptenkorting: alleen op uitdrukkelijke invoer.
-  const jonggehandicapt = ctx.jonggehandicapt ? AFRONDING.korting(hk.jonggehandicapt) : 0
+  const jonggehandicapt = ctx.jonggehandicapt ? rond('jonggehandicapt', hk.jonggehandicapt, hk.jonggehandicapt) : 0
   if (jonggehandicapt > 0) {
     uitleg.push(regel('hk-jonggehandicapt', 'Jonggehandicaptenkorting', jonggehandicapt, 'min', { parameter: 'heffingskortingen.jonggehandicapt' }))
   }
@@ -214,7 +253,7 @@ export function berekenHeffingskortingen(ctx: HeffingskortingenContext): Heffing
   if (ctx.groenVrijstelling > 0) {
     const g = hk.groenBeleggen
     const ruw = g.pct * ctx.groenVrijstelling
-    groenBeleggen = AFRONDING.korting(g.max === null ? ruw : Math.min(g.max, ruw))
+    groenBeleggen = rond('groenBeleggen', g.max === null ? ruw : Math.min(g.max, ruw), g.max ?? Number.POSITIVE_INFINITY)
     uitleg.push(
       regel('hk-groen', 'Heffingskorting groen beleggen', groenBeleggen, 'min', {
         formule: `${pct(g.pct, 2)} × ${eur(ctx.groenVrijstelling)}${g.max !== null ? `, maximaal ${eur(g.max)}` : ''}`,
@@ -258,29 +297,8 @@ export function berekenHeffingskortingen(ctx: HeffingskortingenContext): Heffing
     bruto,
     verzilverd,
     nietVerzilverd,
-    delen: splitsKortingen({ algemeen, arbeid, iack, ouderen, jonggehandicapt, groenBeleggen }, ctx),
+    delen: SOORTEN.map((soort) => delen[soort] ?? { soort, totaal: 0, belastingdeel: 0, premiedeel: 0 }),
     uitleg,
     waarschuwingen,
   }
-}
-
-/**
- * Splitst elke korting in een belastingdeel en een premiedeel, naar de verhouding van het belastingdeel en de
- * premies in het tarief van schijf 1 (zonder AOW-premie als de AOW-leeftijd is bereikt). Het premiedeel is de rest,
- * zodat beide delen samen de korting zijn.
- */
-function splitsKortingen(
-  kortingen: Record<HeffingskortingSoort, number>,
-  ctx: Pick<HeffingskortingenContext, 'params' | 'aowBereikt'>,
-): NonNullable<HeffingskortingenResultaat['delen']> {
-  const b1 = ctx.params.box1.waarde
-  const belastingDeel = b1.schijven[0]?.belastingDeel ?? 0
-  const premiePct = (ctx.aowBereikt ? 0 : b1.premies.aow) + b1.premies.anw + b1.premies.wlz
-  const totaalPct = belastingDeel + premiePct
-  const fractie = totaalPct > 0 ? belastingDeel / totaalPct : 1
-  return (Object.keys(kortingen) as HeffingskortingSoort[]).map((soort) => {
-    const totaal = kortingen[soort]
-    const belastingdeel = AFRONDING.korting(totaal * fractie)
-    return { soort, totaal, belastingdeel, premiedeel: totaal - belastingdeel }
-  })
 }

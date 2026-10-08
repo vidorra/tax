@@ -207,8 +207,9 @@ describe('voorbeeldrapport 2024, persoon A', () => {
     expect(u[0]).toEqual({ label: 'Te betalen inkomstenbelasting', bedrag: 4363, afsluiting: 'enkel' })
     expect(u[1]).toMatchObject({ label: 'Te betalen inkomensafhankelijke bijdrage Zorgverzekeringswet', bedrag: 110 })
     expect(u[2]).toMatchObject({ label: 'Totaal te betalen bedrag', bedrag: 4473, afsluiting: 'dubbel' })
-    expect(u.find((x) => x.label === 'Totaal te betalen bedrag Persoon B')?.bedrag).toBe(211)
-    expect(u.find((x) => x.label === 'Totaal te betalen huishouden')?.bedrag).toBe(4473 + 211)
+    // Persoon B: IB 148 (kortingen per deel naar boven afgerond, KG:202:2022:14) plus Zvw 61.
+    expect(u.find((x) => x.label === 'Totaal te betalen bedrag Persoon B')?.bedrag).toBe(209)
+    expect(u.find((x) => x.label === 'Totaal te betalen huishouden')?.bedrag).toBe(4473 + 209)
   })
 
   it('bronbelasting binnen het verdragstarief: geen verschil en geen melding over verrekening', () => {
@@ -303,7 +304,7 @@ describe('voorbeeldrapport van partner B', () => {
       '2.1.inkomensvoorziening': { B: -2400 },
       '2.1.drempelinkomen': { C: 34469 },
       '2.2.4.betaald': { C: -1800 },
-      '2.2.4.te-betalen': { C: 150 },
+      '2.2.4.te-betalen': { C: 148 },
       '3.1.2.saldo': { C: -6418 },
       '3.1.2.naar-partner': { C: 6418 },
       '3.1.2.toegerekend': { C: 0 },
@@ -321,7 +322,7 @@ describe('voorbeeldrapport van partner B', () => {
     expect(titels).toContain('5 Winstaangifte 2024 van Tekstbureau')
     expect(titels).toContain('5.2 Algemene gegevens en specificaties')
     expect(titels.some((t) => t.includes('Fiscale vermogensopstelling'))).toBe(false)
-    expect(doc.verantwoording.uitkomsten[0]).toMatchObject({ label: 'Te betalen inkomstenbelasting', bedrag: 150 })
+    expect(doc.verantwoording.uitkomsten[0]).toMatchObject({ label: 'Te betalen inkomstenbelasting', bedrag: 148 })
     expect(doc.verantwoording.nietMeegenomen.some((t) => t.startsWith('Tekstbureau: geen jaarrekening ingevoerd.'))).toBe(true)
     expect(doc.verantwoording.meldingen.some((m) => m.tekst.startsWith('Je zit net boven de 1.225 uur.'))).toBe(true)
     const ids = alleIds(doc)

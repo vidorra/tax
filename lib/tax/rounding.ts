@@ -11,7 +11,9 @@
  *  - box 3 effectief rendementspercentage: afgekapt op 2 decimalen (4,3008% → 4,30%), voordeel rekenkundig,
  *    belasting naar beneden (aangiftesoftware). De webuitleg van de Belastingdienst rekent met het
  *    aandeel van de grondslag; zie `box3Aandeel` (kan € 1 verschillen).
- *  - heffingskortingen en toeslagen: rekenkundig (niet door een echte aangifte gedekt).
+ *  - heffingskortingen: belastingdeel en premiedeel elk in het voordeel van de belastingplichtige, dus naar boven, en
+ *    de korting is de som (Kennisgroep Belastingdienst KG:202:2022:14)
+ *  - toeslagen: rekenkundig (niet door een echte aangifte gedekt).
  */
 
 const EPS = 1e-9
@@ -44,7 +46,13 @@ export const AFRONDING = {
   box3Voordeel: rekenkundig,
   box3Belasting: naarBeneden,
   box2Belasting: naarBeneden,
+  /** Rekenkundig; voor de persoonsgebonden aftrek en de planning. Heffingskortingen gaan via `heffingskortingDeel`. */
   korting: rekenkundig,
+  /**
+   * Belastingdeel en premiedeel van een heffingskorting: elk naar boven, in het voordeel van de belastingplichtige
+   * (Kennisgroep Belastingdienst KG:202:2022:14, 21-2-2023). De korting is de som, nooit hoger dan het maximum in de wet.
+   */
+  heffingskortingDeel: naarBoven,
   toeslag: rekenkundig,
   eigenWoning: rekenkundig,
   bijtelling: rekenkundig,

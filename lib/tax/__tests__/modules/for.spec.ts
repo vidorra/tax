@@ -40,7 +40,7 @@ describe('FOR: voorbeeld uit de gap-analyse (G01)', () => {
     expect(o.winst).toBe(60000)
     expect(o.forStandEind).toBe(20000)
     expect(met.personen[0].verschuldigdIB).toBe(zonder.personen[0].verschuldigdIB)
-    expect(met.personen[0].verschuldigdIB).toBe(12095)
+    expect(met.personen[0].verschuldigdIB).toBe(12093) // kortingen per deel naar boven afgerond (KG:202:2022:14)
     expect(o.waarschuwingen.find((w) => w.id.endsWith('for.bovenOndernemingsvermogen'))?.ernst).toBe('info')
   })
 })
@@ -237,7 +237,7 @@ describe('FOR: vrijwillige afname en omzetting hangen aan elkaar (herstel ronde 
     const a = met({ for: { stand: 20000 } }, { forOmzetting: 10000 })
     expect(a.inkomensvoorziening.forOmzettingAftrek).toBe(0)
     expect(a.inkomensvoorziening.nietAftrekbaar).toBe(10000)
-    expect(a.verschuldigdIB).toBe(12095)
+    expect(a.verschuldigdIB).toBe(12093)
     expect(a.inkomensvoorziening.waarschuwingen.find((w) => w.id === 'lijfrente.forOmzettingBovenAfname')?.ernst).toBe('let-op')
   })
 
@@ -298,7 +298,7 @@ describe('FOR: verplichte afname over de FOR na de vrijwillige afname (herstel r
     expect(r.standEind).toBe(15000)
   })
 
-  it('via de engine (geboren 1955): winst 65.000 en IB 6.671 in plaats van 70.000 en 9.267', () => {
+  it('via de engine (geboren 1955): winst 65.000 en IB 6.669 in plaats van 70.000 en 9.265', () => {
     const h = huishouden(onderneming({ for: { stand: 20000, ondernemingsvermogenEinde: 15000, vrijwilligeAfname: 5000 } }), '1955-03-01')
     h.personen[0].inkomensvoorziening = { lijfrentePremies: 0, aovPremies: 0, premiegrondslagInkomenVorigJaar: 60000, forOmzetting: 5000 }
     const a = berekenHuishouden(h, { zonderMarginaleDruk: true }).personen[0]
@@ -306,7 +306,7 @@ describe('FOR: verplichte afname over de FOR na de vrijwillige afname (herstel r
     expect(a.ondernemingen[0].forVrijwilligeAfname).toBe(5000)
     expect(a.ondernemingen[0].winst).toBe(65000)
     expect(a.ondernemingen[0].forStandEind).toBe(15000)
-    expect(a.verschuldigdIB).toBe(6671)
+    expect(a.verschuldigdIB).toBe(6669)
   })
 
   it('vrijwillig minder dan het meerdere: de rest boven het ondernemingsvermogen neemt verplicht af', () => {

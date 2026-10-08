@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest'
 import { berekenHuishouden } from '../engine'
 import { getJaar } from '../years'
 import { berekenBox1 } from '../modules/box1'
-import { berekenHeffingskortingen, type HeffingskortingenContext } from '../modules/heffingskortingen'
+import { arbeidskortingBruto, berekenHeffingskortingen, type HeffingskortingenContext } from '../modules/heffingskortingen'
 import { kiaUitTabel, berekenInvesteringsaftrek, berekenDesinvesteringsbijtelling } from '../modules/onderneming/investeringsaftrek'
 import { berekenBijtellingAuto } from '../modules/onderneming/auto'
 import { toetsUrencriterium } from '../modules/onderneming/urencriterium'
@@ -184,18 +184,19 @@ describe('heffingskortingen', () => {
   it('AHK bouwt in 2024 af op box 1, vanaf 2025 op het verzamelinkomen (box 3 telt mee)', () => {
     const box3 = { posities: [positie('fonds', 'beleggingen', 300000)], schulden: [] }
     // 2024: box 1 = 40.000 − ZA 3.750 = 36.250 − MKB round(13,31% × 36.250 = 4.824,9) = 4.825 → 31.425
-    // AHK = 3.362 − 6,63% × (31.425 − 24.812) = 3.362 − 438,44 = 2.923,6 → 2.924 (box 3 telt niet mee)
+    // AHK = 3.362 − 6,63% × (31.425 − 24.812) = 3.362 − 438,44 = 2.923,56; belastingdeel en premiedeel elk naar boven
+    // (KG:202:2022:14): 738 + 2.187 = 2.925 (box 3 telt niet mee)
     const a24 = run(hh(2024, [pers('A', { ondernemingen: [ond(40000)] })], { box3 })).personen[0]
     expect(a24.box1.inkomen).toBe(31425)
     expect(a24.box3Inkomen).toBeGreaterThan(0)
-    expect(a24.heffingskortingen.algemeen).toBe(2924)
+    expect(a24.heffingskortingen.algemeen).toBe(2925)
     // 2025: box 1 = 40.000 − 2.470 = 37.530 − round(12,7% × 37.530 = 4.766,31) = 4.766 → 32.764
     // box 3: 300.000 × 5,88% = 17.640; grondslag 300.000 − 57.684 = 242.316; 5,88% → voordeel round(14.248,18) = 14.248
-    // verzamelinkomen 47.012 → AHK = 3.068 − 6,337% × (47.012 − 28.406) = 3.068 − 1.179,06 = 1.888,9 → 1.889
+    // verzamelinkomen 47.012 → AHK = 3.068 − 6,337% × (47.012 − 28.406) = 3.068 − 1.179,06 = 1.888,94 → 431 + 1.459 = 1.890
     const a25 = run(hh(2025, [pers('A', { ondernemingen: [ond(40000)] })], { box3 })).personen[0]
     expect(a25.box3Inkomen).toBe(14248)
     expect(a25.verzamelinkomen).toBe(47012)
-    expect(a25.heffingskortingen.algemeen).toBe(1889)
+    expect(a25.heffingskortingen.algemeen).toBe(1890)
   })
 
   it.each([
@@ -224,7 +225,15 @@ describe('heffingskortingen', () => {
     [2027, 47834, 5929],
     [2027, 138909, 0],
   ])('arbeidskorting %i bij %i = %i', (jaar, ai, verwacht) => {
-    expect(berekenHeffingskortingen(hkCtx(jaar, { arbeidsinkomen: ai })).arbeid).toBe(verwacht)
+    // De bedragen in de wet en de sleuteltabel zijn hele euro's: de ongeronde korting ligt er binnen 0,5 euro van.
+    const ruw = arbeidskortingBruto(ai, getJaar(jaar).heffingskortingen.waarde.arbeid).bedrag
+    expect(Math.abs(ruw - verwacht)).toBeLessThan(0.5)
+    // De korting zelf: belastingdeel en premiedeel elk naar boven (KG:202:2022:14), dus 0 tot 2 euro erboven en nooit
+    // boven het maximum.
+    const ak = berekenHeffingskortingen(hkCtx(jaar, { arbeidsinkomen: ai })).arbeid
+    expect(ak - verwacht).toBeGreaterThanOrEqual(0)
+    expect(ak - verwacht).toBeLessThanOrEqual(2)
+    expect(ak).toBeLessThanOrEqual(getJaar(jaar).heffingskortingen.waarde.arbeid.max)
   })
 
   it('IACK: 11,45% boven de drempel tot het maximum', () => {
@@ -253,14 +262,14 @@ describe('heffingskortingen', () => {
   it('IACK bij partners: alleen het laagste arbeidsinkomen; bij gelijk inkomen de oudste (art. 8.14a lid 3)', () => {
     const kinderen: KindInvoer[] = [{ id: 'k', geboortedatum: '2022-03-01' }]
     // A (1980) en B (1991) beide winst 31.000: gelijk arbeidsinkomen → alleen A, de oudste.
-    // IACK = 11,45% × (31.000 − 6.239) = 2.835,13 → 2.835
+    // IACK = 11,45% × (31.000 − 6.239) = 2.835,13; belastingdeel en premiedeel elk naar boven: 643 + 2.193 = 2.836
     const gelijk = run(hh(2026, [pers('A', { geboortedatum: '1980-01-01', ondernemingen: [ond(31000)] }), pers('B', { geboortedatum: '1991-01-01', ondernemingen: [ond(31000)] })], { kinderen }))
-    expect(gelijk.personen.find((x) => x.id === 'A')!.heffingskortingen.iack).toBe(2835)
+    expect(gelijk.personen.find((x) => x.id === 'A')!.heffingskortingen.iack).toBe(2836)
     expect(gelijk.personen.find((x) => x.id === 'B')!.heffingskortingen.iack).toBe(0)
     // Omgekeerd: B is de oudste
     const omgekeerd = run(hh(2026, [pers('A', { geboortedatum: '1991-01-01', ondernemingen: [ond(31000)] }), pers('B', { geboortedatum: '1980-01-01', ondernemingen: [ond(31000)] })], { kinderen }))
     expect(omgekeerd.personen.find((x) => x.id === 'A')!.heffingskortingen.iack).toBe(0)
-    expect(omgekeerd.personen.find((x) => x.id === 'B')!.heffingskortingen.iack).toBe(2835)
+    expect(omgekeerd.personen.find((x) => x.id === 'B')!.heffingskortingen.iack).toBe(2836)
     // Partner zonder arbeidsinkomen: de verdiener is niet de minstverdienende; de partner zit onder de drempel.
     const zonder = run(hh(2026, [pers('A', { ondernemingen: [ond(30000)] }), pers('B')], { kinderen }))
     expect(zonder.personen.map((x) => x.heffingskortingen.iack)).toEqual([0, 0])
@@ -269,10 +278,11 @@ describe('heffingskortingen', () => {
   it('verzilvering: kortingen nooit hoger dan belasting plus premie', () => {
     // winst 10.000 zonder urencriterium: MKB 1.270 → box 1 8.730
     // belasting floor(8,10% × 8.730 = 707,13) = 707, premie floor(27,65% × 8.730 = 2.413,85) = 2.413 → 3.120
-    // AHK 3.115 + AK round(8,324% × 10.000 = 832,4) = 832 → bruto 3.947, verzilverd 3.120
+    // AHK 3.115 + AK 8,324% × 10.000 = 832,40 (belastingdeel en premiedeel naar boven: 189 + 644 = 833) → bruto 3.948,
+    // verzilverd 3.120
     const a = run(hh(2026, [pers('A', { ondernemingen: [ond(10000, { uren: { onderneming: 0, urencriteriumGehaald: false } })] })])).personen[0]
     expect(a.box1.belasting + a.box1.premie).toBe(3120)
-    expect(a.heffingskortingen.bruto).toBe(3947)
+    expect(a.heffingskortingen.bruto).toBe(3948)
     expect(a.heffingskortingen.verzilverd).toBe(3120)
     expect(a.verschuldigdIB).toBe(0)
   })
@@ -294,14 +304,15 @@ describe('heffingskortingen', () => {
 describe('AOW: varianten van kortingen en de persoonlijke AOW-leeftijd', () => {
   it('AHK, arbeidskorting en ouderenkorting voor AOW-gerechtigden (2026)', () => {
     const r = berekenHeffingskortingen(hkCtx(2026, { aowBereikt: true, arbeidsinkomen: 20000, verzamelinkomen: 50000, heeftFiscaalPartner: true }))
-    // AHK AOW: 1.556 − 3,195% × (50.000 − 29.736) = 1.556 − 647,43 = 908,57 → 909
-    expect(r.algemeen).toBe(909)
-    // AK AOW: 498 + 15,483% × (20.000 − 11.965) = 498 + 1.244,06 = 1.742,06 → 1.742
-    expect(r.arbeid).toBe(1742)
-    // ouderenkorting: 2.067 − 15% × (50.000 − 46.002) = 1.467,3 → 1.467 (met partner, geen alleenstaande ouderenkorting)
-    expect(r.ouderen).toBe(1467)
-    // alleenstaand: + 540 → 2.007,3 → 2.007
-    expect(berekenHeffingskortingen(hkCtx(2026, { aowBereikt: true, verzamelinkomen: 50000 })).ouderen).toBe(2007)
+    // Belastingdeel en premiedeel (zonder AOW-premie) elk naar boven afgerond (KG:202:2022:14).
+    // AHK AOW: 1.556 − 3,195% × (50.000 − 29.736) = 1.556 − 647,43 = 908,57 → 413 + 497 = 910
+    expect(r.algemeen).toBe(910)
+    // AK AOW: 498 + 15,483% × (20.000 − 11.965) = 498 + 1.244,06 = 1.742,06 → 791 + 952 = 1.743
+    expect(r.arbeid).toBe(1743)
+    // ouderenkorting: 2.067 − 15% × (50.000 − 46.002) = 1.467,3 → 666 + 802 = 1.468 (met partner, geen alleenstaande ouderenkorting)
+    expect(r.ouderen).toBe(1468)
+    // alleenstaand: + 540 → 2.007,3; elk deel naar boven: 2.008
+    expect(berekenHeffingskortingen(hkCtx(2026, { aowBereikt: true, verzamelinkomen: 50000 })).ouderen).toBe(2008)
   })
 
   it.each([
@@ -417,11 +428,12 @@ describe('ondernemer', () => {
 
   it('verrekende verliezen uit eerdere jaren verlagen het verzamelinkomen niet (art. 2.18: inkomen uit werk en woning)', () => {
     // box 1 vóór verliesverrekening 42.602; verlies 2022 van 20.000 → belastbaar 22.602
-    // verzamelinkomen = 42.602 → AHK = 3.115 − 6,398% × (42.602 − 29.736) = 3.115 − 823,17 = 2.291,8 → 2.292
+    // verzamelinkomen = 42.602 → AHK = 3.115 − 6,398% × (42.602 − 29.736) = 3.115 − 823,17 = 2.291,83; belastingdeel en
+    // premiedeel elk naar boven: 2.293
     const a = run(hh(2026, [pers('A', { ondernemingen: [ond(50000)], verliezen: [{ jaar: 2022, bedrag: 20000 }] })])).personen[0]
     expect(a.box1.inkomen).toBe(22602)
     expect(a.verzamelinkomen).toBe(42602)
-    expect(a.heffingskortingen.algemeen).toBe(2292)
+    expect(a.heffingskortingen.algemeen).toBe(2293)
   })
 
   it.each([
