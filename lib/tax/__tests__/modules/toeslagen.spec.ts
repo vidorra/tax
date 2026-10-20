@@ -92,6 +92,35 @@ describe('kinderopvangtoeslag', () => {
   it('geen opvang geeft geen toeslag', () => {
     expect(berekenKot([{ id: 'x', geboortedatum: '2025-01-01' }], 50000, { params: p2026, jaar: 2026 }).totaal).toBe(0)
   })
+
+  it('totaal uren uit het jaaroverzicht: rekent met het gemiddelde per maand en de kosten over het totaal', () => {
+    const totaal: KindInvoer = { id: 't', geboortedatum: '2026-06-01', opvang: [{ soort: 'dagopvang', urenPerMaand: 0, urenTotaal: 310.5, uurtarief: 10.5, maanden: 3, startdatum: '2026-10-01' }] }
+    const perMaand: KindInvoer = { id: 'm', geboortedatum: '2026-06-01', opvang: [{ soort: 'dagopvang', urenPerMaand: 103.5, uurtarief: 10.5, maanden: 3, startdatum: '2026-10-01' }] }
+    const rt = berekenKot([totaal], 170000, { params: p2026, jaar: 2026 })
+    const rm = berekenKot([perMaand], 170000, { params: p2026, jaar: 2026 })
+    const rij = kotPercentage(p2026.toeslagen.waarde.kot.tabel, 170000).rij!
+    expect(rt.totaal).toBe(Math.round(310.5 * 10.5 * rij.pctKind1))
+    expect(rt.totaal).toBe(rm.totaal)
+    expect(rt.perKind[0].kostenPerJaar).toBe(Math.round(310.5 * 10.5))
+    expect(rt.uitleg.find((u) => u.id === 'kot.t.dagopvang')?.formule).toContain('310,5 uur in 3 maanden = 103,5 uur per maand')
+    expect(rt.waarschuwingen.some((w) => w.id.startsWith('kot-maanden'))).toBe(false)
+  })
+
+  it('totaal uren zonder het veld uren per maand telt als opvang', () => {
+    const k: KindInvoer = { id: 'k', geboortedatum: '2026-01-01', opvang: [{ soort: 'bso', urenPerMaand: 0, urenTotaal: 120, uurtarief: 9, maanden: 6 }] }
+    expect(berekenKot([k], 50000, { params: p2026, jaar: 2026 }).totaal).toBeGreaterThan(0)
+  })
+
+  it('meldt meer maanden dan er na de startdatum in het jaar liggen', () => {
+    const k: KindInvoer = { id: 'k', naam: 'Kind', geboortedatum: '2026-06-01', opvang: [{ soort: 'dagopvang', urenPerMaand: 0, urenTotaal: 300, uurtarief: 10, maanden: 12, startdatum: '2026-10-01' }] }
+    const r = berekenKot([k], 50000, { params: p2026, jaar: 2026 })
+    const w = r.waarschuwingen.find((x) => x.id.startsWith('kot-maanden'))
+    expect(w?.ernst).toBe('let-op')
+    expect(w?.tekst).toContain('hooguit 3 maanden')
+    // Vorig jaar gestart: alle 12 maanden kunnen.
+    const vorig = { ...k, opvang: [{ ...k.opvang![0], startdatum: '2025-10-01' }] }
+    expect(berekenKot([vorig], 50000, { params: p2026, jaar: 2026 }).waarschuwingen.some((x) => x.id.startsWith('kot-maanden'))).toBe(false)
+  })
 })
 
 describe('kindgebonden budget', () => {

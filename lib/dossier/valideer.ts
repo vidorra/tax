@@ -498,6 +498,7 @@ export function valideerInvoer(obj: unknown): string[] {
       c.getal(o, 'urenPerMaand', op, true)
       c.getal(o, 'uurtarief', op, true)
       c.getal(o, 'maanden', op, true)
+      c.getal(o, 'urenTotaal', op)
       c.datum(o, 'startdatum', op)
     })
   })

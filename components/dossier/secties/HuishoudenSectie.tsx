@@ -14,6 +14,17 @@ type Opvang = NonNullable<KindInvoer['opvang']>[number]
 
 const OPVANG_LABEL: Record<Opvang['soort'], string> = { dagopvang: 'Dagopvang', bso: 'BSO', gastouder: 'Gastouder' }
 
+const uurNL = (n: number): string => n.toLocaleString('nl-NL', { maximumFractionDigits: 1 })
+
+/** Wissel tussen vaste uren per maand en het totaal van het jaaroverzicht; de uren gaan mee om. */
+function naarUrenInvoer(x: Opvang, m: 'maand' | 'jaar'): void {
+  if (m === 'jaar' && x.urenTotaal === undefined) x.urenTotaal = x.urenPerMaand * x.maanden
+  if (m === 'maand' && x.urenTotaal !== undefined) {
+    if (x.maanden > 0) x.urenPerMaand = Math.round(x.urenTotaal / x.maanden)
+    delete x.urenTotaal
+  }
+}
+
 export function HuishoudenSectie({ invoer, wijzig }: SectieProps) {
   const heeftB = invoer.personen.some((p) => p.id === 'B')
   return (
@@ -113,10 +124,39 @@ export function HuishoudenSectie({ invoer, wijzig }: SectieProps) {
                             />
                           )}
                         </VeldVak>
+                        <ChipGroup<'maand' | 'jaar'>
+                          label="Uren invullen"
+                          kolommen={2}
+                          value={o.urenTotaal !== undefined ? 'jaar' : 'maand'}
+                          onChange={(m) => pasO((x) => naarUrenInvoer(x, m))}
+                          options={[
+                            { value: 'maand', label: 'Vast per maand' },
+                            { value: 'jaar', label: 'Totaal uit jaaroverzicht' },
+                          ]}
+                        />
                         <Rij>
-                          <Getal label="Uren per maand" veld={veld(`kind:${itemSleutel(k, ki)}`, `opvang:${oi}`, 'urenPerMaand')} suffix="uur" value={o.urenPerMaand} onChange={(v) => pasO((x) => void (x.urenPerMaand = v ?? 0))} />
+                          {o.urenTotaal !== undefined ? (
+                            <Getal
+                              label="Totaal uren in het jaar"
+                              veld={veld(`kind:${itemSleutel(k, ki)}`, `opvang:${oi}`, 'urenTotaal')}
+                              suffix="uur"
+                              decimalen={2}
+                              hint={o.maanden > 0 && o.urenTotaal > 0 ? `Gemiddeld ${uurNL(o.urenTotaal / o.maanden)} uur per maand.` : 'Staat onderaan het jaaroverzicht van de opvang.'}
+                              value={o.urenTotaal}
+                              onChange={(v) => pasO((x) => void (x.urenTotaal = v ?? 0))}
+                            />
+                          ) : (
+                            <Getal label="Uren per maand" veld={veld(`kind:${itemSleutel(k, ki)}`, `opvang:${oi}`, 'urenPerMaand')} suffix="uur" value={o.urenPerMaand} onChange={(v) => pasO((x) => void (x.urenPerMaand = v ?? 0))} />
+                          )}
                           <Bedrag label="Uurtarief" veld={veld(`kind:${itemSleutel(k, ki)}`, `opvang:${oi}`, 'uurtarief')} decimalen={2} value={o.uurtarief} onChange={(v) => pasO((x) => void (x.uurtarief = v ?? 0))} />
-                          <Getal label="Aantal maanden" veld={veld(`kind:${itemSleutel(k, ki)}`, `opvang:${oi}`, 'maanden')} suffix="mnd" max={12} value={o.maanden} onChange={(v) => pasO((x) => void (x.maanden = v ?? 0))} />
+                          <Getal
+                            label={o.urenTotaal !== undefined ? 'Maanden met opvang' : 'Aantal maanden'}
+                            veld={veld(`kind:${itemSleutel(k, ki)}`, `opvang:${oi}`, 'maanden')}
+                            suffix="mnd"
+                            max={12}
+                            value={o.maanden}
+                            onChange={(v) => pasO((x) => void (x.maanden = v ?? 0))}
+                          />
                           <Datum label="Startdatum" veld={veld(`kind:${itemSleutel(k, ki)}`, `opvang:${oi}`, 'startdatum')} hint="Voor de aanvraagtermijn van de toeslag." value={o.startdatum} onChange={(v) => pasO((x) => (v ? (x.startdatum = v) : delete x.startdatum))} />
                         </Rij>
                       </div>

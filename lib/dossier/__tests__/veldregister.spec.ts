@@ -24,11 +24,11 @@ import { PersoonVeldProvider } from '@/components/dossier/controles/veld-context
 import { vulIds } from '../ids'
 import { BASIS_VELDEN } from '../veldregister/basis'
 import { VELDREGISTER } from '../veldregister'
-import { instanties, matchPatroon } from '../zoeken'
+import { instanties, matchPatroon, opPagina } from '../zoeken'
 
 function invoer(): HuishoudenInvoer {
   const i = vulIds(voorbeeldInvoer(2024))
-  i.kinderen = [{ id: 'kind-1', naam: 'Kind', geboortedatum: '2022-03-01', inHuishoudenVanaf: '2022-03-01', coOuderschap: { dagenInHuishouden: 180 }, opvang: [{ soort: 'dagopvang', urenPerMaand: 80, uurtarief: 9.5, maanden: 12, startdatum: '2023-01-01' }] }]
+  i.kinderen = [{ id: 'kind-1', naam: 'Kind', geboortedatum: '2022-03-01', inHuishoudenVanaf: '2022-03-01', coOuderschap: { dagenInHuishouden: 180 }, opvang: [{ soort: 'dagopvang', urenPerMaand: 80, uurtarief: 9.5, maanden: 12, startdatum: '2023-01-01' }, { soort: 'bso', urenPerMaand: 0, urenTotaal: 289.6, uurtarief: 9.5, maanden: 3 }] }]
   const a = i.personen[0]
   a.loon = [{ id: 'loon-1', omschrijving: 'Acme BV', soort: 'loon', bruto: 1000, ingehoudenLoonheffing: 100, zvwBijdrageloon: 1000 }]
   a.inkomensvoorziening.pensioencorrectieVorigJaar = { type: 'factorA', bedrag: 500 }
@@ -111,7 +111,7 @@ describe('veldregister basis.ts tegen de editor', () => {
   })
 
   it('het zoekveld vindt alleen velden die de editor rendert', () => {
-    const missend = BASIS_VELDEN.flatMap((v) => instanties(v.patroon, i).map((m) => m.id)).filter((id) => !ids.includes(id))
+    const missend = BASIS_VELDEN.flatMap((v) => instanties(v.patroon, i).filter((m) => opPagina(v, m, i)).map((m) => m.id)).filter((id) => !ids.includes(id))
     expect(missend).toEqual([])
   })
 })

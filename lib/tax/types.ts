@@ -1180,7 +1180,14 @@ export interface KindInvoer {
     soort: 'dagopvang' | 'bso' | 'gastouder'
     urenPerMaand: number
     uurtarief: number
+    /** Maanden met opvang in dit jaar. */
     maanden: number
+    /**
+     * Totaal aantal opvanguren in het jaar, zoals op het jaaroverzicht van de opvang. Ingevuld = gaat voor
+     * `urenPerMaand`: de engine rekent met het gemiddelde (totaal / maanden). Dat is exact zolang geen maand boven
+     * het maximum aantal uren per maand uitkomt.
+     */
+    urenTotaal?: number
     startdatum?: string
   }>
 }

@@ -8,9 +8,10 @@
  * `sectie` is het anker op de jaarpagina; '{persoon}' wordt de persoon van het veld ('ondernemingen-{persoon}' wordt
  * 'ondernemingen-A'). De veld-id's zijn gelijk aan de `veld`-props in de secties (zie lib/dossier/veld.ts).
  */
-import type { BalansPost, WvRubriek } from '@/lib/tax/types'
+import type { BalansPost, HuishoudenInvoer, WvRubriek } from '@/lib/tax/types'
 import { BALANS_POST_INFO, BALANS_POSTEN, WV_RUBRIEKEN, WV_RUBRIEK_INFO } from '../jaarrekening'
-import type { VeldregisterItem } from './types'
+import { itemSleutel } from '../ids'
+import type { VeldMatch, VeldregisterItem } from './types'
 
 const HUISHOUDEN = { sectie: 'huishouden', sectieNaam: 'Huishouden' }
 const ONDERNEMINGEN = { sectie: 'ondernemingen-{persoon}', sectieNaam: 'Ondernemingen' }
@@ -21,6 +22,14 @@ const VERDELING = { sectie: 'verdeling', sectieNaam: 'Verdeling tussen partners'
 
 const ONDERNEMING = 'persoon:*/onderneming:*'
 const JAARREKENING = `${ONDERNEMING}/jaarrekening`
+
+/** De opvangregel van een veld 'kind:<sleutel>/opvang:<index>/…'. */
+function opvangVan(m: VeldMatch, invoer: HuishoudenInvoer) {
+  const kind = invoer.kinderen.find((k, i) => itemSleutel(k, i) === m.sleutels[0])
+  return kind?.opvang?.[Number(m.sleutels[1])]
+}
+/** De editor toont uren per maand of het totaal van het jaaroverzicht, nooit allebei. */
+const metTotaal = (m: VeldMatch, invoer: HuishoudenInvoer) => opvangVan(m, invoer)?.urenTotaal !== undefined
 
 const kleine = (s: string) => s.charAt(0).toLocaleLowerCase('nl-NL') + s.slice(1)
 
@@ -33,9 +42,10 @@ const huishouden: VeldregisterItem[] = [
   { patroon: 'kind:*/inHuishoudenVanaf', label: 'Kind in het huishouden vanaf', ...HUISHOUDEN, synoniemen: ['kinderen', 'pleegkind'] },
   { patroon: 'kind:*/coOuderschap.dagenInHuishouden', label: 'Co-ouderschap: dagen per jaar in jullie huishouden', ...HUISHOUDEN, synoniemen: ['co-ouderschap', 'coouderschap', 'gescheiden'] },
   { patroon: 'kind:*/opvang:*/soort', label: 'Soort kinderopvang', ...HUISHOUDEN, synoniemen: ['kinderopvang', 'kinderopvangtoeslag', 'dagopvang', 'bso', 'gastouder'] },
-  { patroon: 'kind:*/opvang:*/urenPerMaand', label: 'Kinderopvang: uren per maand', ...HUISHOUDEN, synoniemen: ['kinderopvang', 'kinderopvangtoeslag'] },
+  { patroon: 'kind:*/opvang:*/urenPerMaand', label: 'Kinderopvang: uren per maand', ...HUISHOUDEN, synoniemen: ['kinderopvang', 'kinderopvangtoeslag'], bestaat: (m, invoer) => !metTotaal(m, invoer) },
   { patroon: 'kind:*/opvang:*/uurtarief', label: 'Kinderopvang: uurtarief', ...HUISHOUDEN, synoniemen: ['kinderopvang', 'kinderopvangtoeslag'] },
   { patroon: 'kind:*/opvang:*/maanden', label: 'Kinderopvang: aantal maanden', ...HUISHOUDEN, synoniemen: ['kinderopvang'] },
+  { patroon: 'kind:*/opvang:*/urenTotaal', label: 'Kinderopvang: totaal uren in het jaar', ...HUISHOUDEN, synoniemen: ['kinderopvang', 'kinderopvangtoeslag', 'jaaroverzicht'], bestaat: metTotaal },
   { patroon: 'kind:*/opvang:*/startdatum', label: 'Kinderopvang: startdatum', ...HUISHOUDEN, synoniemen: ['kinderopvang'] },
 ]
 

@@ -6,6 +6,8 @@
  *    elk volgend kind krijgt pctKind2. Bij gelijke uren telt de invoervolgorde.
  *  - Per opvangregel: uren begrensd op maxUrenPerMaand, uurprijs begrensd op de
  *    maximum uurprijs van de opvangsoort; toeslag = uren × min(tarief, max) × pct × maanden.
+ *    Met `urenTotaal` (jaaroverzicht van de opvang) zijn de uren per maand het gemiddelde
+ *    totaal / maanden; exact zolang geen maand boven het maximum uitkomt.
  *  - Het percentage komt uit de eerste tabelrij met totInkomen ≥ toetsingsinkomen
  *    (totInkomen null = laatste rij).
  *  - Aanvragen kan tot `terugwerkendeMaanden` terug: uiterlijk op de laatste dag van
@@ -17,9 +19,10 @@
 import type { KindInvoer, KotResultaat, KotTabelRij, TaxYearParams, Uitlegregel, Waarschuwing } from '../../types'
 import { AFRONDING } from '../../rounding'
 import { regel, waarschuwing, eur, pct, datumNL } from '../../uitleg'
-import { isoDatum, parseDatum } from '../../datum'
+import { isoDatum, maandenTotEindeJaar, parseDatum } from '../../datum'
 
 type OpvangSoort = 'dagopvang' | 'bso' | 'gastouder'
+type Opvang = NonNullable<KindInvoer['opvang']>[number]
 
 const SOORT_LABEL: Record<OpvangSoort, string> = {
   dagopvang: 'dagopvang',
@@ -47,8 +50,17 @@ export function laatsteDagNaMaanden(datum: string, maanden: number): string {
   return isoDatum(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + maanden + 1, 0)))
 }
 
+/** Uren per maand van een opvangregel: het gemiddelde uit `urenTotaal` als dat is ingevuld, anders `urenPerMaand`. */
+export function urenPerMaandVan(o: Opvang): number {
+  if (o.urenTotaal !== undefined && o.maanden > 0) return o.urenTotaal / o.maanden
+  return o.urenPerMaand
+}
+
+/** Uren met één of twee decimalen: 289,6 of 96,53. */
+const uurNL = (n: number): string => n.toLocaleString('nl-NL', { maximumFractionDigits: 2 })
+
 const totaalUrenPerJaar = (kind: KindInvoer, maxUren: number): number =>
-  (kind.opvang ?? []).reduce((s, o) => s + Math.min(o.urenPerMaand, maxUren) * o.maanden, 0)
+  (kind.opvang ?? []).reduce((s, o) => s + Math.min(urenPerMaandVan(o), maxUren) * o.maanden, 0)
 
 export function berekenKot(
   kinderen: KindInvoer[],
@@ -61,7 +73,7 @@ export function berekenKot(
   const waarschuwingen: Waarschuwing[] = []
   const perKind: KotResultaat['perKind'] = []
 
-  const metOpvang = kinderen.filter((k) => (k.opvang ?? []).some((o) => o.urenPerMaand > 0 && o.maanden > 0))
+  const metOpvang = kinderen.filter((k) => (k.opvang ?? []).some((o) => urenPerMaandVan(o) > 0 && o.maanden > 0))
   if (metOpvang.length === 0) return { perKind, totaal: 0, uitleg, waarschuwingen }
 
   // Rangorde: meeste opvanguren eerst; sort is stabiel, dus gelijke uren houden de invoervolgorde.
@@ -98,7 +110,7 @@ export function berekenKot(
     let vroegsteStart: string | undefined
     const naam = kind.naam ?? `kind ${rang}`
 
-    const somUren = (kind.opvang ?? []).reduce((s, o) => s + o.urenPerMaand, 0)
+    const somUren = (kind.opvang ?? []).reduce((s, o) => s + urenPerMaandVan(o), 0)
     if ((kind.opvang ?? []).length > 1 && somUren > kot.maxUrenPerMaand) {
       waarschuwingen.push(
         waarschuwing(
@@ -110,11 +122,14 @@ export function berekenKot(
     }
 
     for (const o of kind.opvang ?? []) {
-      if (o.urenPerMaand <= 0 || o.maanden <= 0) continue
+      const gemiddeld = urenPerMaandVan(o)
+      if (gemiddeld <= 0 || o.maanden <= 0) continue
+      const totaal = o.urenTotaal !== undefined
       const max = kot.maxUurprijs[o.soort]
-      const uren = Math.min(o.urenPerMaand, kot.maxUrenPerMaand)
+      const uren = Math.min(gemiddeld, kot.maxUrenPerMaand)
       const tarief = Math.min(o.uurtarief, max)
-      const kostenJaar = o.urenPerMaand * o.uurtarief * o.maanden
+      const urenJaar = totaal ? o.urenTotaal! : o.urenPerMaand * o.maanden
+      const kostenJaar = urenJaar * o.uurtarief
       const perMaand = uren * tarief * percentage
       const toeslagJaar = AFRONDING.toeslag(perMaand * o.maanden)
       kosten += kostenJaar
@@ -124,26 +139,38 @@ export function berekenKot(
       uitleg.push(
         regel(`kot.${kind.id}.${o.soort}`, `${naam}: ${SOORT_LABEL[o.soort]}`, toeslagJaar, 'plus', {
           niveau: 2,
-          formule: `${eur(uren)} uur × ${eurCent(tarief)} × ${pct(percentage, 1)} = ${eurCent(perMaand)} per maand × ${o.maanden} maanden`,
+          formule: totaal
+            ? `${uurNL(o.urenTotaal!)} uur in ${o.maanden} maanden = ${uurNL(uren)} uur per maand × ${eurCent(tarief)} × ${pct(percentage, 1)} = ${eurCent(perMaand)} per maand × ${o.maanden} maanden`
+            : `${eur(uren)} uur × ${eurCent(tarief)} × ${pct(percentage, 1)} = ${eurCent(perMaand)} per maand × ${o.maanden} maanden`,
           parameter: `toeslagen.kot.maxUurprijs.${o.soort}`,
           status,
         }),
       )
       if (o.uurtarief > max) {
         uitleg.push(
-          regel(`kot.${kind.id}.${o.soort}.boven-max`, `Uurprijs boven het maximum (betaal je zelf)`, AFRONDING.toeslag((o.uurtarief - max) * o.urenPerMaand * o.maanden), 'info', {
+          regel(`kot.${kind.id}.${o.soort}.boven-max`, `Uurprijs boven het maximum (betaal je zelf)`, AFRONDING.toeslag((o.uurtarief - max) * urenJaar), 'info', {
             niveau: 2,
             formule: `${eurCent(o.uurtarief)} − ${eurCent(max)} = ${eurCent(o.uurtarief - max)} per uur`,
             parameter: `toeslagen.kot.maxUurprijs.${o.soort}`,
           }),
         )
       }
-      if (o.urenPerMaand > kot.maxUrenPerMaand) {
+      if (gemiddeld > kot.maxUrenPerMaand) {
         waarschuwingen.push(
           waarschuwing(
             `kot-max-uren-${kind.id}-${o.soort}`,
             'info',
-            `Voor ${naam} telt de toeslag over ${eur(kot.maxUrenPerMaand)} van de ${eur(o.urenPerMaand)} uur per maand; de rest betaal je volledig zelf.`,
+            `Voor ${naam} telt de toeslag over ${eur(kot.maxUrenPerMaand)} van de ${uurNL(gemiddeld)} uur per maand${totaal ? ' (gemiddeld)' : ''}; de rest betaal je volledig zelf.`,
+          ),
+        )
+      }
+      if (o.startdatum && maandenTotEindeJaar(o.startdatum, ctx.jaar) < o.maanden) {
+        const kan = maandenTotEindeJaar(o.startdatum, ctx.jaar)
+        waarschuwingen.push(
+          waarschuwing(
+            `kot-maanden-${kind.id}-${o.soort}`,
+            'let-op',
+            `De ${SOORT_LABEL[o.soort]} voor ${naam} begon op ${datumNL(o.startdatum)}. In ${ctx.jaar} zijn dat hooguit ${kan} ${kan === 1 ? 'maand' : 'maanden'}, maar er staan er ${o.maanden} ingevuld. Pas het aantal maanden aan, anders is de toeslag te hoog berekend.`,
           ),
         )
       }
