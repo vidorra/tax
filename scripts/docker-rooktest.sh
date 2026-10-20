@@ -179,7 +179,9 @@ ok "scripts/backup.ts in de image: back-up gemaakt en gecontroleerd"
 echo "Nieuwe container met dezelfde datamap (zoals een deploy)"
 docker rm -f "$naam" >/dev/null
 start_container
-docker logs "$naam" 2>&1 | grep -q 'geen nieuwe migraties' || mislukt "start.sh migreerde niet, of migreerde opnieuw"
+# Eerst naar een bestand: `docker logs | grep -q` faalt onder pipefail als grep stopt voordat docker klaar is (SIGPIPE).
+docker logs "$naam" > "$werk/logs-herstart.txt" 2>&1 || true
+grep -q 'geen nieuwe migraties' "$werk/logs-herstart.txt" || { tail -20 "$werk/logs-herstart.txt" >&2; mislukt "start.sh migreerde niet, of migreerde opnieuw"; }
 aantal="$(docker exec -u node "$naam" node -e "const D=require('better-sqlite3');const d=new D('/app/data/ibcalculator.db',{readonly:true});console.log(d.prepare('SELECT count(*) AS n FROM users WHERE totp_enabled = 1').get().n)")"
 [ "$aantal" = "1" ] || mislukt "na de nieuwe start $aantal accounts met 2FA, verwacht 1"
 curl -fsSL "$basis/dossier/setup/" -o "$werk/setup2.html" || mislukt "/dossier/setup/ na de nieuwe start"
