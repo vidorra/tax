@@ -59,7 +59,7 @@ export function SetupFormulier() {
       )}
       {!qr ? (
         <form onSubmit={maakAccount} className="space-y-4" noValidate>
-          <Field ids={ids.email} label="E-mailadres" hint="Alleen om in te loggen; we sturen geen e-mail.">
+          <Field ids={ids.email} label="E-mailadres" hint="Hiermee log je in.">
             <input id={ids.email.invoer} type="email" autoComplete="username" required value={email} aria-describedby={ids.email.hint} onChange={(e) => setEmail(e.target.value)} className={invoerKlasse} />
           </Field>
           <Field ids={ids.ww} label="Wachtwoord" hint={`Minimaal ${MIN} tekens. Een zin van een paar woorden werkt goed.`} error={wachtwoordFout}>

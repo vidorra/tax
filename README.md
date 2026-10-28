@@ -57,14 +57,25 @@ De database is één SQLite-bestand, zonder aparte databaseserver: lokaal `./dat
 | `TRUSTED_PROXY_HOPS` | rate limits | Standaard 1 (één reverse proxy, zoals de nginx van CapRover); 2 met Cloudflare ervoor |
 | `NEXT_PUBLIC_UMAMI_WEBSITE_ID`, `NEXT_PUBLIC_UMAMI_SRC` | statistiek | Staat uit. Wil je cookieless statistiek met Umami, zet deze twee dan als vaste waarden in `.github/workflows/deploy.yml` bij de stap Build (ze komen bij het bouwen in de pagina's; in CapRover zetten heeft geen effect). De CSP staat dan de host uit `NEXT_PUBLIC_UMAMI_SRC` toe |
 | `GIT_SHA` | `/api/health` | Optioneel. Bij een deploy zet de workflow hem in `.env.production` in de tarball |
-| `MONEYBIRD_TOKEN`, `MONEYBIRD_ADMINISTRATION_ID` | Moneybird-koppeling | Optioneel; een koppeling uit de omgeving (id `env`) naast de koppelingen die je in het dossier toevoegt |
+| `MONEYBIRD_TOKEN`, `MONEYBIRD_ADMINISTRATION_ID` | (vervallen) | Niet meer gebruikt: met meer accounts zou elk account dit token zien. Staat het er nog, dan zet de server het bij de start één keer om naar een versleutelde koppeling van de eerste beheerder (persoon A); daarna mag het weg |
 | `BACKUP_MAIL_TO` | back-up | Eén mailadres dat op 1 februari en 1 augustus de versleutelde back-up krijgt |
-| `MAIL_FROM`, `MAIL_REPLY_TO` | back-up | Afzender op een geverifieerd domein, bijvoorbeeld `noreply@example.nl`; antwoordadres optioneel |
-| `RESEND_API_KEY` | back-up | Mailen via Resend (voorkeur) |
-| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` | back-up | Alternatief zonder Resend; poort standaard 587, bij 465 met TLS |
+| `MAIL_FROM`, `MAIL_REPLY_TO` | back-up, uitnodigingen | Afzender op een geverifieerd domein, bijvoorbeeld `noreply@example.nl`; antwoordadres optioneel |
+| `RESEND_API_KEY` | back-up, uitnodigingen | Mailen via Resend (voorkeur) |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` | back-up, uitnodigingen | Alternatief zonder Resend; poort standaard 587, bij 465 met TLS |
 | `DATABASE_PATH` | dossier | Optioneel. Pad van het SQLite-bestand; standaard `data/ibcalculator.db` in de werkmap. De image zet `/app/data/ibcalculator.db`, dus in de container laat je hem weg. De map moet schrijfbaar zijn |
 
 `DOSSIER_KEY` nooit wijzigen zonder herversleuteling: bestaande dossiers zijn dan niet meer te openen.
+
+## Accounts
+
+Het eerste account maak je op `/dossier/setup/`; dat wordt **beheerder**. Daarna is setup dicht en komen er accounts bij via **Accounts** (`/beheer/`, alleen voor beheerders):
+
+- **Uitnodigen:** e-mailadres, naam en rol. De mail (via dezelfde mailer als de back-up) bevat een link `/account/instellen/#<token>` die 7 dagen geldig is en één keer werkt; het token staat achter de `#`, zodat het niet in serverlogs of de Referer komt. De database bewaart alleen de SHA-256 ervan. Is er geen mailer of lukt mailen niet, dan ziet de beheerder de link om zelf door te sturen.
+- **Instellen:** de ontvanger kiest een wachtwoord en bevestigt een code uit een authenticator-app. Het account bestaat pas na die code; tot dan staan de bcrypt-hash en het versleutelde TOTP-geheim in de uitnodiging.
+- **Herstellink:** voor een bestaand account (telefoon kwijt, wachtwoord vergeten), 48 uur geldig. Het oude wachtwoord werkt tot het nieuwe is bevestigd; daarna worden alle sessies van dat account ingetrokken.
+- **Rollen en verwijderen:** er blijft altijd minstens één beheerder. Verwijderen neemt het hele dossier mee. Een beheerder ziet de accounts, niet hun dossiers. De back-up (die alle accounts bevat) is alleen voor beheerders.
+- **Opslag:** wachtwoorden als bcrypt-hash, TOTP-geheimen versleuteld met `DOSSIER_KEY` (AAD per rij; oude, leesbare geheimen worden bij de start versleuteld, zie `lib/opstart.ts`).
+- Code: `lib/auth/uitnodiging.ts`, `lib/auth/uitnodiging-mail.ts`, `lib/auth/totp-opslag.ts`, routes onder `app/api/beheer/` en `app/api/account/instellen/`, tabel `uitnodigingen` (migratie `0002_accounts.sql`). Uitleg voor gebruikers: `/handleiding/`.
 
 ## Moneybird-koppeling
 
@@ -81,7 +92,8 @@ Het dossier kan per onderneming de cijfers van een jaar uit Moneybird halen (all
   | Vaste activa | `assets` | `documents` |
   | Uren | `time_entries` | `time_entries` |
 - **In het dossier:** voeg het token toe als koppeling. Het wordt eerst bij Moneybird gecontroleerd en daarna versleuteld opgeslagen (AES-256-GCM met `DOSSIER_KEY`, gebonden aan huishouden en rij); naar de browser gaat alleen een masker. Maximaal tien koppelingen per huishouden.
-- **Uit de omgeving:** met `MONEYBIRD_TOKEN` en `MONEYBIRD_ADMINISTRATION_ID` verschijnt een extra koppeling `env`. Die kan niet in de app worden verwijderd; haar eigen indeling wordt in de database bewaard.
+- **Van wie?** Elke koppeling hangt aan persoon A of B van het dossier. Zo koppelt een partner een eigen administratie in hetzelfde dossier; de onderneming van een persoon kiest standaard diens koppeling en nooit vanzelf die van de ander.
+- **Geen token in de serverinstellingen meer.** `MONEYBIRD_TOKEN` gold voor de hele installatie en dus voor elk account. `lib/moneybird/omgeving-overzetten.ts` zet een oud token bij de start één keer om naar een versleutelde koppeling van de eerste beheerder, met de bewaarde indeling.
 - **Limieten:** Moneybird staat 150 verzoeken per 5 minuten toe; één import kost ongeveer tien verzoeken plus een per klant zonder naam in het rapport. De app staat per huishouden tien imports per 5 minuten toe.
 - Code: `lib/moneybird/` (contract in `types.ts`), routes onder `app/api/dossier/koppelingen/`, tabel `koppelingen`.
 
@@ -197,7 +209,7 @@ Bij een pull request naar `main` draaien stap 1 tot en met 4 wel, de deploy niet
 1. Maak een app voor ibcalculator en zet bij het aanmaken **Has Persistent Data** aan. Dat kan later niet meer; vergeet je het, maak de app dan opnieuw aan.
 2. Voeg bij App Configs onder **Persistent Directories** een map toe: *Path in App* `/app/data`, *Label* bijvoorbeeld `ibcalculator-data`. CapRover maakt daar een Docker-volume van dat deploys en herstarts overleeft. Zonder deze map staat de database in de container en is hij bij de volgende deploy weg.
 3. Zet **Container HTTP Port** op 3000, **HTTPS** aan met doorsturen van HTTP naar HTTPS, en **Instance Count** op 1. Er schrijft één proces tegelijk in het databasebestand, en de back-upplanner en de rate limits draaien in het geheugen van één container.
-4. Zet onder **Environmental Variables** alles wat de app bij het draaien leest: `AUTH_SECRET`, `DOSSIER_KEY`, eventueel `TRUSTED_PROXY_HOPS`, voor de back-up `BACKUP_MAIL_TO`, `MAIL_FROM` en `RESEND_API_KEY` (of de `SMTP_*`-variabelen), en eventueel `MONEYBIRD_TOKEN` en `MONEYBIRD_ADMINISTRATION_ID`. `DATABASE_PATH`, `PORT` en `GIT_SHA` laat je weg: de image zet `/app/data/ibcalculator.db` en poort 3000, en de versie komt uit de tarball. De `NEXT_PUBLIC_*`-variabelen horen hier niet; die zijn al bij het bouwen vastgezet.
+4. Zet onder **Environmental Variables** alles wat de app bij het draaien leest: `AUTH_SECRET`, `DOSSIER_KEY`, eventueel `TRUSTED_PROXY_HOPS`, voor de back-up en de uitnodigingsmails `BACKUP_MAIL_TO`, `MAIL_FROM` en `RESEND_API_KEY` (of de `SMTP_*`-variabelen). `MONEYBIRD_TOKEN` en `MONEYBIRD_ADMINISTRATION_ID` zijn vervallen; staan ze er nog, haal ze dan weg na de eerste start van deze versie (de log zegt wanneer). `DATABASE_PATH`, `PORT` en `GIT_SHA` laat je weg: de image zet `/app/data/ibcalculator.db` en poort 3000, en de versie komt uit de tarball. De `NEXT_PUBLIC_*`-variabelen horen hier niet; die zijn al bij het bouwen vastgezet.
 5. Bij elke start geeft `start.sh` de map `/app/data` aan de gebruiker `node` (een volume of een map op de host is vaak van root), voert als `node` de migraties uit (idempotent, per migratie een transactie; bij de eerste start maakt dat het bestand aan) en start dan de server, ook als het migreren mislukt, zodat de publieke rekentool blijft werken.
 6. Open `/dossier/setup` direct na de eerste deploy: de eerste die daar een account aanmaakt, claimt de instantie.
 7. Controleer `/api/health`: laatste definitieve jaar, varianten en `versie`, de eerste zeven tekens van de commit die live staat.

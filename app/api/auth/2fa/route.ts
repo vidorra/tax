@@ -1,9 +1,10 @@
 import { clientIp, fout, herkomstFout, json, leesJson, nietGeconfigureerd, serverFout } from '@/lib/auth/api'
-import { gebruikerOpId } from '@/lib/auth/gebruiker'
+import { gebruikerOpId, raakIngelogd } from '@/lib/auth/gebruiker'
 import { accountLimiter, loginLimiter } from '@/lib/auth/rate-limit'
 import { TWEEFA_COOKIE } from '@/lib/auth/sessie'
 import { leesToken, wisCookie, zetSessie } from '@/lib/auth/server'
 import { codeAlGebruikt, verifieerTotp } from '@/lib/auth/totp'
+import { totpGeheimVan, versleutelTotpVan } from '@/lib/auth/totp-opslag'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -31,7 +32,7 @@ export async function POST(req: Request) {
     const body = await leesJson<{ code?: unknown }>(req, 2_000)
     const gebruiker = await gebruikerOpId(token.userId)
     if (!gebruiker || !gebruiker.totpEnabled) return fout(401, 'Je inlogpoging is verlopen. Vul je wachtwoord opnieuw in.')
-    const stap = verifieerTotp(gebruiker.totpSecret, body?.code)
+    const stap = verifieerTotp(totpGeheimVan(gebruiker), body?.code)
     if (stap === null || codeAlGebruikt(gebruiker.id, stap)) {
       limiet.mislukt(sleutel)
       perAccount.mislukt(accountSleutel)
@@ -41,6 +42,14 @@ export async function POST(req: Request) {
     perAccount.reset(accountSleutel)
     await wisCookie(TWEEFA_COOKIE)
     await zetSessie(gebruiker.id, gebruiker.sessieGeneratie)
+    // Bijwerken mag de login niet laten mislukken: de sessie staat al.
+    try {
+      await raakIngelogd(gebruiker.id)
+      // Een geheim uit een oude installatie staat nog leesbaar: nu versleutelen (de start van de server doet dat ook).
+      versleutelTotpVan(gebruiker)
+    } catch (e) {
+      console.error(`[auth/2fa] bijwerken na login: ${(e as Error)?.name ?? 'onbekend'}`)
+    }
     return json({ ok: true })
   } catch (e) {
     return serverFout(e, 'auth/2fa')

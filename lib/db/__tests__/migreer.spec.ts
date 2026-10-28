@@ -54,7 +54,7 @@ describe('migreer', () => {
     expect(uitgevoerdeMigraties(s)).toEqual(op)
     expect(onbekendeMigraties(s)).toEqual([])
     const tabellen = (s.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`).all() as Array<{ name: string }>).map((r) => r.name)
-    expect(tabellen).toEqual(['_migrations', 'aangifte_staat', 'accountant_docs', 'backups', 'dossier_years', 'herstelpunten', 'households', 'koppelingen', 'snapshots', 'users'])
+    expect(tabellen).toEqual(['_migrations', 'aangifte_staat', 'accountant_docs', 'backups', 'dossier_years', 'herstelpunten', 'households', 'koppelingen', 'snapshots', 'uitnodigingen', 'users'])
     const { uitgevoerd_op } = s.prepare('SELECT uitgevoerd_op FROM _migrations').get() as { uitgevoerd_op: string }
     expect(uitgevoerd_op).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/)
   })

@@ -30,6 +30,13 @@ IB-aangiftetool voor zzp-huishoudens. Het plan (versie 2) staat buiten deze repo
 - Tests met een database gebruiken `gebruikTijdelijkeDb()` uit `lib/db/testdb.ts`: een eigen, gemigreerd bestand per test. Ze draaien altijd. `vitest.setup.ts` zet `DATABASE_PATH` per testbestand op een tijdelijk pad en laat het bestand falen als een test daar toch een database opent, zodat de suite nooit `./data/ibcalculator.db` raakt.
 - Fouten van de database vertaal je met `dbFoutSoort(e)`; nooit inhoud van rijen in een melding of log.
 
+## Accounts (`lib/auth`)
+
+- Meer accounts per installatie. Het eerste (setup) is beheerder; de rest komt via een uitnodiging (`lib/auth/uitnodiging.ts`). Elk account heeft een eigen huishouden; alles in `lib/dossier` en de routes filtert op het account van de sessie, ook voor beheerders.
+- Beheerroutes gaan via `metBeheerder` (`app/api/beheer/hulp.ts`). De back-up bevat alle accounts en is alleen voor beheerders.
+- Tokens van uitnodigingen alleen als SHA-256 in de database; TOTP-geheimen alleen versleuteld (`lib/auth/totp-opslag.ts`, `enc:`-voorvoegsel, AAD per rij). Nooit een token, hash, geheim of e-mailadres loggen.
+- Geen Moneybird-token uit de omgeving: koppelingen staan per huishouden en per persoon (A/B) in de database.
+
 ## Deploy (`Dockerfile`, `start.sh`)
 
 - Bouwen en testen gebeurt in GitHub Actions (`.github/workflows/deploy.yml`), niet op de server: `next build`, dan `scripts/deploy-tarball.sh` (deploy.tar met de kant-en-klare `.next`), dan de image uit die tarball bouwen (linux/amd64) en `scripts/docker-rooktest.sh` met `ROOKTEST_BOUW=0`. Alleen als dat slaagt, bij een push naar main, deployt `caprover/deploy-from-github`. Geen Docker op de Mac nodig.

@@ -38,8 +38,8 @@ describe('maakSnapshot', () => {
     ]).run()
 
     const s = await maakSnapshot(getSqlite(), { gitSha: 'abc1234', nu: new Date('2027-02-01T03:00:00.000Z') })
-    expect(s).toMatchObject({ formaat: 'ibcalculator-backup', versie: 2, gitSha: 'abc1234', gemaaktOp: '2027-02-01T03:00:00.000Z', migraties: ['0001_init.sql'] })
-    expect(s.rijen).toEqual({ users: 1, households: 1, dossier_years: 2, snapshots: 1, accountant_docs: 1, aangifte_staat: 0, herstelpunten: 0, koppelingen: 1 })
+    expect(s).toMatchObject({ formaat: 'ibcalculator-backup', versie: 2, gitSha: 'abc1234', gemaaktOp: '2027-02-01T03:00:00.000Z', migraties: ['0001_init.sql', '0002_accounts.sql'] })
+    expect(s.rijen).toEqual({ users: 1, households: 1, dossier_years: 2, snapshots: 1, accountant_docs: 1, aangifte_staat: 0, herstelpunten: 0, koppelingen: 1, uitnodigingen: 0 })
     expect(Object.keys(s.rijen)).toEqual([...TABELLEN])
 
     const kopie = open(s.database)
@@ -47,7 +47,7 @@ describe('maakSnapshot', () => {
       expect(tabelInhoud(kopie)).toEqual(tabelInhoud())
       expect(kopie.prepare('SELECT count(*) AS n FROM backups').get()).toEqual({ n: 0 })
       expect(kopie.prepare(`SELECT name FROM sqlite_sequence WHERE name = 'backups'`).all()).toEqual([])
-      expect(kopie.prepare('SELECT naam FROM _migrations').all()).toEqual([{ naam: '0001_init.sql' }])
+      expect(kopie.prepare('SELECT naam FROM _migrations ORDER BY naam').all()).toEqual([{ naam: '0001_init.sql' }, { naam: '0002_accounts.sql' }])
       expect(kopie.pragma('integrity_check', { simple: true })).toBe('ok')
     } finally {
       kopie.close()

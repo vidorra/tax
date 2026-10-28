@@ -31,7 +31,7 @@ export default async function LoginPagina() {
         <Alert variant="actie" titel="Nog geen account">
           Er is nog geen account voor dit dossier.{' '}
           <Link href="/dossier/setup/" className="font-medium text-primary underline underline-offset-2 hover:text-primary-dark">
-            Maak het account aan
+            Maak het eerste account aan
           </Link>
           .
         </Alert>

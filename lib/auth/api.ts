@@ -129,6 +129,16 @@ export async function vereisGebruiker(): Promise<{ userId: number } | NextRespon
   return { userId: gebruiker.id }
 }
 
+/** Ingelogde beheerder, of 401 (niet ingelogd) of 403 (geen beheerder). */
+export async function vereisBeheerder(): Promise<{ userId: number; email: string; naam: string | null } | NextResponse> {
+  const sessie = await getSessie()
+  if (!sessie) return fout(401, 'Je bent niet ingelogd of je sessie is verlopen. Log opnieuw in.')
+  const gebruiker = await gebruikerOpId(sessie.userId)
+  if (!gebruiker || !gebruiker.totpEnabled || !sessieNogGeldig(sessie, gebruiker)) return fout(401, 'Je bent niet ingelogd of je sessie is verlopen. Log opnieuw in.')
+  if (gebruiker.rol !== 'beheerder') return fout(403, 'Alleen een beheerder kan dit.')
+  return { userId: gebruiker.id, email: gebruiker.email, naam: gebruiker.naam }
+}
+
 /**
  * Meldingen bij databasefouten die de gebruiker of de beheerder zelf kan oplossen. Een geschonden UNIQUE of CHECK is
  * een fout in de app en krijgt de gewone melding.

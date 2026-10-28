@@ -30,11 +30,13 @@ export interface MoneybirdImportProps {
   onderneming: OndernemingInvoer
   jaar: number
   koppelingen: KoppelingenStaat
+  /** Van wie de onderneming is: kiest standaard de koppeling van deze persoon. */
+  persoon?: 'A' | 'B'
   /** Krijgt de import met de keuzes van de gebruiker en de overname-opties; de sectie past neemOver toe. */
   onOvernemen: (imp: MbJaarImport, opties: MbOvernameOpties) => void
 }
 
-export function MoneybirdImport({ onderneming, jaar, koppelingen, onOvernemen }: MoneybirdImportProps) {
+export function MoneybirdImport({ onderneming, jaar, koppelingen, persoon, onOvernemen }: MoneybirdImportProps) {
   const basis = useId().replace(/:/g, '')
   const bruikbaar = bruikbareKoppelingen(koppelingen.koppelingen)
   const [gekozen, setGekozen] = useState<string>('')
@@ -48,7 +50,7 @@ export function MoneybirdImport({ onderneming, jaar, koppelingen, onOvernemen }:
   /** Telt het openen van het controlepaneel, zodat de focus alleen dan naar de kop gaat. */
   const [geopend, setGeopend] = useState(0)
 
-  const koppelingId = gekozen || voorkeurKoppeling(koppelingen.koppelingen, onderneming.bron) || ''
+  const koppelingId = gekozen || voorkeurKoppeling(koppelingen.koppelingen, onderneming.bron, persoon) || ''
 
   useEffect(() => {
     if (geopend > 0) kopRef.current?.focus()
@@ -167,6 +169,7 @@ export function MoneybirdImport({ onderneming, jaar, koppelingen, onOvernemen }:
             label="Moneybird-koppeling"
             value={koppelingId}
             onChange={setGekozen}
+            placeholder={koppelingId ? undefined : 'Kies een koppeling'}
             options={bruikbaar.map((k) => ({ value: k.id, label: `${k.label}${k.administratieNaam ? ` (${k.administratieNaam})` : ''}` }))}
             wrapperClassName="sm:flex-1"
           />

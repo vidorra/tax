@@ -1,6 +1,6 @@
 /**
- * Beveiliging van het dossier: /dossier/* (behalve login en setup) en /api/dossier/* vragen een
- * geldige sessie. Pagina's sturen door naar de login, de API geeft 401 in JSON. Zonder AUTH_SECRET
+ * Beveiliging van het dossier: /dossier/* (behalve login en setup), /api/dossier/*, /beheer en /api/beheer/* vragen een
+ * geldige sessie (de rol beheerder controleren de pagina en de routes zelf). Pagina's sturen door naar de login, de API geeft 401 in JSON. Zonder AUTH_SECRET
  * laat de middleware alles door: pagina's tonen dan uitleg over de configuratie, de API geeft 503.
  */
 import { NextResponse, type NextRequest } from 'next/server'
@@ -26,5 +26,5 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/dossier', '/dossier/:path*', '/api/dossier/:path*'],
+  matcher: ['/dossier', '/dossier/:path*', '/api/dossier/:path*', '/beheer', '/beheer/:path*', '/api/beheer/:path*'],
 }

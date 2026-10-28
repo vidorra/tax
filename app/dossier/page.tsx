@@ -8,6 +8,7 @@ import { VOORBEELD_JAAR } from '@/lib/voorbeeld'
 import { laadTerugvragen } from '@/lib/dossier/terugvragen-opslag'
 import { actiefHerstelpunt } from '@/lib/dossier/import-opslag'
 import { vandaagAmsterdam } from '@/lib/dossier/nieuw-jaar-keuze'
+import { gebruikerOpId, isBeheerder } from '@/lib/auth/gebruiker'
 
 export const dynamic = 'force-dynamic'
 export const metadata = { title: 'Overzicht' }
@@ -17,8 +18,10 @@ export default async function DossierOverzicht() {
   if (ctx.soort === 'niet-geconfigureerd') return <NietGeconfigureerd ontbreekt={ctx.ontbreekt} />
   if (ctx.soort === 'fout') return <DatabaseFout melding={ctx.melding} />
   let jaren
+  let beheerder = false
   try {
     jaren = await lijstJaren(ctx.householdId)
+    beheerder = isBeheerder(await gebruikerOpId(ctx.userId))
   } catch (e) {
     return <DatabaseFout melding={databaseMelding(e)} />
   }
@@ -41,7 +44,7 @@ export default async function DossierOverzicht() {
   return (
     <Container breedte="normaal">
       <PageHeader kicker="Dossier" titel="Je belastingjaren" intro="Per jaar de volledige invoer van je huishouden, de berekening, planning en de vergelijking met je accountant. Alles staat versleuteld opgeslagen." />
-      <Overzicht jaren={jaren} beschikbaar={beschikbaar} voorbeeldJaar={VOORBEELD_JAAR} terugvragen={terugvragen} herstelpunt={herstelpunt} vandaag={vandaagAmsterdam()} />
+      <Overzicht jaren={jaren} beschikbaar={beschikbaar} voorbeeldJaar={VOORBEELD_JAAR} terugvragen={terugvragen} herstelpunt={herstelpunt} vandaag={vandaagAmsterdam()} beheerder={beheerder} />
     </Container>
   )
 }

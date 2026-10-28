@@ -27,7 +27,7 @@ vi.mock('next/headers', () => ({
   }),
 }))
 
-const gebruikers = new Map<number, { id: number; email: string; passwordHash: string; totpSecret: string; totpEnabled: boolean; sessieGeneratie: number; createdAt: Date }>()
+const gebruikers = new Map<number, { id: number; email: string; passwordHash: string; totpSecret: string; totpEnabled: boolean; sessieGeneratie: number; createdAt: Date; rol: 'beheerder' | 'gebruiker'; naam: string | null }>()
 vi.mock('@/lib/auth/gebruiker', async (orig) => ({
   ...(await orig<typeof import('@/lib/auth/gebruiker')>()),
   gebruikerOpId: async (id: number) => gebruikers.get(id) ?? null,
@@ -51,8 +51,8 @@ function verzoek(methode: string, headers: Record<string, string> = {}): Request
   })
 }
 
-async function inloggen(userId: number) {
-  gebruikers.set(userId, { id: userId, email: `u${userId}@example.nl`, passwordHash: 'x', totpSecret: '', totpEnabled: true, sessieGeneratie: 0, createdAt: new Date() })
+async function inloggen(userId: number, rol: 'beheerder' | 'gebruiker' = 'beheerder') {
+  gebruikers.set(userId, { id: userId, email: `u${userId}@example.nl`, passwordHash: 'x', totpSecret: '', totpEnabled: true, sessieGeneratie: 0, createdAt: new Date(), rol, naam: null })
   cookieStore.set(SESSIE_COOKIE, { value: await maakToken(userId, 'sessie'), opties: {} })
 }
 
@@ -76,11 +76,17 @@ afterEach(() => {
 
 describe('controles vóór de back-up', () => {
   it('zonder sessie 401, van een andere site 403', async () => {
-    expect((await route.GET()).status).toBe(401)
+    expect((await route.GET(verzoek('GET'))).status).toBe(401)
     expect((await route.POST(verzoek('POST'))).status).toBe(401)
     await inloggen(1)
     expect((await route.POST(verzoek('POST', { 'sec-fetch-site': 'cross-site' }))).status).toBe(403)
     expect((await route.POST(verzoek('POST', { 'sec-fetch-site': 'same-site' }))).status).toBe(403)
+  })
+
+  it('een gewone gebruiker krijgt 403: een back-up bevat alle accounts', async () => {
+    await inloggen(2, 'gebruiker')
+    expect((await route.GET(verzoek('GET'))).status).toBe(403)
+    expect((await route.POST(verzoek('POST'))).status).toBe(403)
   })
 
   it('dossier niet ingericht: 503', async () => {
@@ -118,7 +124,7 @@ describe('route op een echte database', () => {
     await inloggen(1)
     const teksten: string[] = []
 
-    const voor = await lees(await route.GET())
+    const voor = await lees(await route.GET(verzoek('GET')))
     teksten.push(voor.tekst)
     expect(voor.status).toBe(200)
     expect(voor.data).toMatchObject({ geconfigureerd: true, ontbreekt: [], ontvanger: 'b•••@example.nl', momenten: ['02-01', '08-01'], laatste: null, laatsteGeslaagd: null })
@@ -154,7 +160,7 @@ describe('route op een echte database', () => {
     expect(teVaak.headers.get('retry-after')).toBe('3600')
     expect(nep.verzoeken).toHaveLength(3)
 
-    const na = await lees(await route.GET())
+    const na = await lees(await route.GET(verzoek('GET')))
     teksten.push(na.tekst)
     for (const t of teksten) {
       expect(t).not.toContain(ONTVANGER)

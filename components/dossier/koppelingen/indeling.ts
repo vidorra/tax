@@ -112,11 +112,16 @@ export function bruikbareKoppelingen(koppelingen: MbKoppelingPubliek[]): MbKoppe
   return koppelingen.filter((k) => Boolean(k.administratieId))
 }
 
-/** Voorkeur: de koppeling waaruit deze onderneming eerder is geïmporteerd, anders de eerste. */
-export function voorkeurKoppeling(koppelingen: MbKoppelingPubliek[], bron: OndernemingInvoer['bron']): string | null {
+/**
+ * Voorkeur: de koppeling waaruit deze onderneming eerder is geïmporteerd; anders de eerste koppeling van deze persoon
+ * (Van wie); anders de eerste koppeling die aan niemand hangt. Een koppeling van de ander wordt nooit vanzelf gekozen,
+ * zodat de cijfers van je partner niet ongemerkt in jouw onderneming komen (kiezen kan wel, in de lijst).
+ */
+export function voorkeurKoppeling(koppelingen: MbKoppelingPubliek[], bron: OndernemingInvoer['bron'], persoon?: 'A' | 'B'): string | null {
   const bruikbaar = bruikbareKoppelingen(koppelingen)
   if (bron && bruikbaar.some((k) => k.id === bron.koppelingId)) return bron.koppelingId
-  return bruikbaar[0]?.id ?? null
+  if (!persoon) return bruikbaar[0]?.id ?? null
+  return (bruikbaar.find((k) => k.persoon === persoon) ?? bruikbaar.find((k) => !k.persoon))?.id ?? null
 }
 
 const DATUM = new Intl.DateTimeFormat('nl-NL', { timeZone: 'Europe/Amsterdam', day: 'numeric', month: 'long', year: 'numeric' })

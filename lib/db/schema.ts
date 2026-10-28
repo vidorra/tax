@@ -43,6 +43,9 @@ export const tijdstip = customType<{ data: Date; driverData: string }>({
 
 const bool = (naam: string) => integer(naam, { mode: 'boolean' })
 
+export type Rol = 'beheerder' | 'gebruiker'
+export type UitnodigingSoort = 'uitnodiging' | 'herstel'
+
 export const users = sqliteTable(
   'users',
   {
@@ -54,8 +57,48 @@ export const users = sqliteTable(
     /** Verhoogd bij uitloggen en bij herstel van een back-up; sessietokens met een lagere generatie zijn ingetrokken. */
     sessieGeneratie: integer('sessie_generatie').notNull().default(0),
     createdAt: tijdstip('created_at').notNull().default(NU_ISO),
+    /** Beheerders nodigen accounts uit en ontvangen de back-ups; gebruikers zien alleen hun eigen dossier. */
+    rol: text('rol').$type<Rol>().notNull().default('gebruiker'),
+    naam: text('naam'),
+    laatstIngelogd: tijdstip('laatst_ingelogd'),
   },
-  (t) => [check('users_totp_enabled_check', sql`${t.totpEnabled} IN (0, 1)`)],
+  (t) => [check('users_totp_enabled_check', sql`${t.totpEnabled} IN (0, 1)`), check('users_rol_check', sql`${t.rol} IN ('beheerder', 'gebruiker')`)],
+)
+
+/**
+ * Uitnodigingen voor een nieuw account en herstellinks voor een bestaand account (lib/auth/uitnodiging.ts). Alleen de
+ * SHA-256 van het token staat hier. wachtwoord_hash (bcrypt) en totp_enc (versleuteld) staan klaar tijdens het
+ * instellen en gaan pas na de eerste goede code naar users.
+ */
+export const uitnodigingen = sqliteTable(
+  'uitnodigingen',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    soort: text('soort').$type<UitnodigingSoort>().notNull(),
+    email: text('email').notNull(),
+    naam: text('naam'),
+    rol: text('rol').$type<Rol>().notNull().default('gebruiker'),
+    userId: integer('user_id').references(() => users.id, { onDelete: 'cascade' }),
+    tokenHash: text('token_hash').notNull(),
+    aangemaaktDoor: integer('aangemaakt_door').references(() => users.id, { onDelete: 'set null' }),
+    aangemaakt: tijdstip('aangemaakt').notNull().default(NU_ISO),
+    verloopt: tijdstip('verloopt').notNull(),
+    gemaildOp: tijdstip('gemaild_op'),
+    wachtwoordHash: text('wachtwoord_hash'),
+    totpEnc: text('totp_enc'),
+    gebruiktOp: tijdstip('gebruikt_op'),
+    ingetrokkenOp: tijdstip('ingetrokken_op'),
+  },
+  (t) => [
+    check('uitnodigingen_soort_check', sql`${t.soort} IN ('uitnodiging', 'herstel')`),
+    check('uitnodigingen_rol_check', sql`${t.rol} IN ('beheerder', 'gebruiker')`),
+    check(
+      'uitnodigingen_account_check',
+      sql`(${t.soort} = 'herstel' AND ${t.userId} IS NOT NULL) OR (${t.soort} = 'uitnodiging' AND (${t.userId} IS NULL OR ${t.gebruiktOp} IS NOT NULL))`,
+    ),
+    uniqueIndex('uitnodigingen_token_uniek').on(t.tokenHash),
+    index('uitnodigingen_email_idx').on(t.email),
+  ],
 )
 
 export const households = sqliteTable(
@@ -176,8 +219,14 @@ export const koppelingen = sqliteTable(
     indelingEnc: text('indeling_enc'),
     aangemaakt: tijdstip('aangemaakt').notNull().default(NU_ISO),
     laatstGebruikt: tijdstip('laatst_gebruikt'),
+    /** Van wie de administratie is: persoon A of B in het dossier; null = niet gekozen. */
+    persoon: text('persoon').$type<'A' | 'B'>(),
   },
-  (t) => [index('koppelingen_household_idx').on(t.householdId), uniqueIndex('koppelingen_env_uniek').on(t.householdId).where(sql`soort = 'moneybird-env'`)],
+  (t) => [
+    index('koppelingen_household_idx').on(t.householdId),
+    uniqueIndex('koppelingen_env_uniek').on(t.householdId).where(sql`soort = 'moneybird-env'`),
+    check('koppelingen_persoon_check', sql`${t.persoon} IS NULL OR ${t.persoon} IN ('A', 'B')`),
+  ],
 )
 
 /**
@@ -210,6 +259,7 @@ export const backups = sqliteTable(
 )
 
 export type Gebruiker = typeof users.$inferSelect
+export type UitnodigingRij = typeof uitnodigingen.$inferSelect
 export type DossierJaarRij = typeof dossierYears.$inferSelect
 export type KoppelingRij = typeof koppelingen.$inferSelect
 export type BackupRij = typeof backups.$inferSelect

@@ -100,9 +100,8 @@ const testDb = gebruikTijdelijkeDb()
 
 describe('pure onderdelen', () => {
   it('id uit het pad', () => {
-    expect(opslag.koppelingIdUitPad('env')).toBe('env')
     expect(opslag.koppelingIdUitPad('12')).toBe(12)
-    for (const x of ['0', '-1', '1.5', 'abc', '1234567890', '']) expect(opslag.koppelingIdUitPad(x)).toBeNull()
+    for (const x of ['env', '0', '-1', '1.5', 'abc', '1234567890', '']) expect(opslag.koppelingIdUitPad(x)).toBeNull()
   })
   it('token en label', () => {
     expect(opslag.schoonToken(`  ${NEP_TOKEN} `)).toBe(NEP_TOKEN)
@@ -111,10 +110,12 @@ describe('pure onderdelen', () => {
     expect(opslag.schoonLabel('')).toBeNull()
     expect(opslag.schoonLabel('x'.repeat(81))).toBeNull()
   })
-  it('koppeling uit de omgeving alleen met token en een geldig administratienummer', () => {
-    expect(opslag.envKoppeling({ MONEYBIRD_TOKEN: NEP_TOKEN, MONEYBIRD_ADMINISTRATION_ID: NEP_ADM })).toEqual({ token: NEP_TOKEN, administratieId: NEP_ADM })
-    expect(opslag.envKoppeling({ MONEYBIRD_TOKEN: NEP_TOKEN })).toBeNull()
-    expect(opslag.envKoppeling({ MONEYBIRD_TOKEN: NEP_TOKEN, MONEYBIRD_ADMINISTRATION_ID: 'abc' })).toBeNull()
+  it('persoon: A, B of leeg; de rest is ongeldig', () => {
+    expect(opslag.schoonPersoon('A')).toBe('A')
+    expect(opslag.schoonPersoon('B')).toBe('B')
+    expect(opslag.schoonPersoon(null)).toBeNull()
+    expect(opslag.schoonPersoon('')).toBeNull()
+    for (const x of ['C', 'a', 1, {}]) expect(opslag.schoonPersoon(x)).toBeUndefined()
   })
 })
 
@@ -348,82 +349,72 @@ describe('koppelingen in de database', () => {
     const teVeel = Object.fromEntries(Array.from({ length: MAX_INDELING_REGELS + 1 }, (_, i) => [String(1000 + i), 'kosten' as const]))
     await expect(opslag.bewaarIndeling(hh, id, teVeel)).rejects.toMatchObject({ status: 422 })
     expect(await opslag.laadIndeling(hh, id)).toEqual({ '1': 'kosten' })
-    // Ook geen nieuwe omgevingsrij als de eerste indeling van de omgevingskoppeling al te groot is.
-    await expect(opslag.bewaarIndeling(hh, 'env', teVeel)).rejects.toMatchObject({ status: 422 })
-    expect(aantalRijen(hh, 'moneybird-env')).toBe(0)
   })
 
-  it('koppeling uit de omgeving: niet te verwijderen, indeling in één eigen rij, mee in de export, weg met het huishouden', async () => {
+  it('van wie: bij toevoegen en later te wijzigen, mee in de lijst en de export', async () => {
     zetMoneybirdFetch(nepMoneybird().fetch)
-    const { hh } = gebruikerMetHuishouden('env@example.nl')
-    // Zonder MONEYBIRD_TOKEN bestaat 'env' niet.
-    expect(await opslag.laadKoppeling(hh, 'env')).toBeNull()
-    expect(await opslag.laadIndeling(hh, 'env')).toBeNull()
-    expect(await opslag.bewaarIndeling(hh, 'env', { '606': 'kosten' })).toBeNull()
-    expect(await opslag.kiesAdministratie(hh, 'env', NEP_ADM, undefined)).toBeNull()
-    await opslag.raakAan(hh, 'env')
-    expect(aantalRijen(hh)).toBe(0)
+    const { hh } = gebruikerMetHuishouden('partner@example.nl')
+    const { koppeling: eigen } = await opslag.maakKoppeling(hh, { token: NEP_TOKEN, label: 'Eigen', persoon: 'A' })
+    const { koppeling: partner } = await opslag.maakKoppeling(hh, { token: NEP_TOKEN, label: 'Partner' })
+    expect(eigen.persoon).toBe('A')
+    expect(partner.persoon).toBeNull()
+    expect(await opslag.wijzigKoppeling(hh, Number(partner.id), { persoon: 'B' })).toMatchObject({ persoon: 'B', label: 'Partner' })
+    expect(await opslag.wijzigKoppeling(hh, Number(partner.id), { label: 'Studio partner' })).toMatchObject({ persoon: 'B', label: 'Studio partner' })
+    expect((await opslag.lijstKoppelingen(hh)).map((k) => k.persoon)).toEqual(['A', 'B'])
+    expect(opslag.exporteerKoppelingen(hh).map((k) => k.persoon)).toEqual(['A', 'B'])
+    // Een koppeling van een ander huishouden is niet te wijzigen.
+    const { hh: ander } = gebruikerMetHuishouden('ander@example.nl')
+    expect(await opslag.wijzigKoppeling(ander, Number(partner.id), { persoon: 'A' })).toBeNull()
+  })
 
-    process.env.MONEYBIRD_TOKEN = NEP_TOKEN
-    process.env.MONEYBIRD_ADMINISTRATION_ID = NEP_ADM
-    await opslag.maakKoppeling(hh, { token: NEP_TOKEN, label: 'Eigen' })
+  it('token uit de serverinstellingen: alleen naar het huishouden met de oude omgevingsrij, één keer', async () => {
+    const { zetOmgevingskoppelingOver } = await import('../omgeving-overzetten')
+    const { aadKoppeling } = opslag
+    expect(await zetOmgevingskoppelingOver({})).toBe('geen-variabelen')
+    const env = { MONEYBIRD_TOKEN: NEP_TOKEN, MONEYBIRD_ADMINISTRATION_ID: NEP_ADM }
+    // Een (latere) beheerder met het laagste id krijgt niets: alleen de oude omgevingsrij wijst het huishouden aan.
+    const { userId: beheerderId, hh: beheerderHh } = gebruikerMetHuishouden('beheer@example.nl')
+    getDb().update(users).set({ rol: 'beheerder' }).where(eq(users.id, beheerderId)).run()
+    expect(await zetOmgevingskoppelingOver(env)).toBe('geen-oude-koppeling')
+    expect(aantalRijen(beheerderHh)).toBe(0)
+
+    const { hh } = gebruikerMetHuishouden('eigenaar@example.nl')
+    const oud = getDb().insert(koppelingen).values({ householdId: hh, soort: 'moneybird-env', label: 'Moneybird (server)', tokenEnc: '', administratieNaam: 'Studio Voorbeeld' }).returning().get()
+    getDb().update(koppelingen).set({ indelingEnc: versleutel({ '606': 'kosten' }, aadKoppeling.indeling(hh, oud.id)) }).where(eq(koppelingen.id, oud.id)).run()
+
+    expect(await zetOmgevingskoppelingOver(env)).toBe('overgezet')
+    expect(aantalRijen(beheerderHh)).toBe(0)
     const lijst = await opslag.lijstKoppelingen(hh)
-    expect(lijst.map((k) => [k.id, k.bron])).toEqual([['env', 'env'], [expect.any(String), 'dossier']])
-    expect(lijst[0]).toMatchObject({ administratieId: NEP_ADM, tokenMasker: '••••••abcd', administratieNaam: null })
-    await expect(opslag.verwijderKoppeling(hh, 'env')).rejects.toMatchObject({ status: 409 })
-    await expect(opslag.kiesAdministratie(hh, 'env', '100000000000000002', undefined)).rejects.toMatchObject({ status: 409 })
-    expect(await opslag.kiesAdministratie(hh, 'env', NEP_ADM, undefined)).toMatchObject({ id: 'env', bron: 'env' })
-    expect(await opslag.laadKoppeling(hh, 'env')).toMatchObject({ token: NEP_TOKEN, naamBekend: false })
-    expect(await opslag.laadIndeling(hh, 'env')).toEqual({})
+    expect(lijst).toHaveLength(1)
+    expect(lijst[0]).toMatchObject({ persoon: 'A', administratieId: NEP_ADM, administratieNaam: 'Studio Voorbeeld', tokenMasker: '••••••abcd', bron: 'dossier' })
+    const id = Number(lijst[0].id)
+    expect(await opslag.laadKoppeling(hh, id)).toMatchObject({ token: NEP_TOKEN })
+    expect(await opslag.laadIndeling(hh, id)).toEqual({ '606': 'kosten' })
     expect(aantalRijen(hh, 'moneybird-env')).toBe(0)
+    expect(JSON.stringify(getDb().select().from(koppelingen).all())).not.toContain(NEP_TOKEN)
 
-    // Gelijktijdig: indeling bewaren en aanraken maken samen precies één omgevingsrij.
-    await Promise.all([
-      opslag.bewaarIndeling(hh, 'env', { '606': 'kosten' }),
-      opslag.raakAan(hh, 'env', 'Studio Voorbeeld'),
-      opslag.bewaarIndeling(hh, 'env', { '607': 'omzet' }),
-    ])
-    expect(aantalRijen(hh, 'moneybird-env')).toBe(1)
-    expect(await opslag.laadIndeling(hh, 'env')).toEqual({ '606': 'kosten', '607': 'omzet' })
-    expect(await opslag.laadKoppeling(hh, 'env')).toMatchObject({ naamBekend: true, administratie: { id: NEP_ADM, naam: 'Studio Voorbeeld' } })
-    const envRij = getDb().select().from(koppelingen).where(and(eq(koppelingen.householdId, hh), eq(koppelingen.soort, 'moneybird-env'))).get()!
-    expect(envRij.tokenEnc).toBe('')
-    // De omgevingsrij is geen gewone koppeling: niet via haar numerieke id te bereiken.
-    expect(await opslag.laadKoppeling(hh, envRij.id)).toBeNull()
-    expect(await opslag.verwijderKoppeling(hh, envRij.id)).toBe(false)
-    expect((await opslag.lijstKoppelingen(hh)).length).toBe(2)
-    expect((await opslag.lijstKoppelingen(hh))[0]).toMatchObject({ administratieNaam: 'Studio Voorbeeld', laatstGebruikt: expect.any(String) })
-
-    const uitExport = opslag.exporteerKoppelingen(hh)
-    const tekst = JSON.stringify(uitExport)
-    expect(tekst).not.toContain(NEP_TOKEN)
-    expect(tekst).not.toContain('abcd')
-    expect(uitExport.map((k) => k.id).sort()).toEqual([expect.stringMatching(/^\d+$/), 'env'])
-    expect(uitExport.find((k) => k.id === 'env')).toMatchObject({ soort: 'moneybird-env', indeling: { '606': 'kosten', '607': 'omzet' }, administratieNaam: 'Studio Voorbeeld' })
-    expect(uitExport.find((k) => k.id !== 'env')).toMatchObject({ soort: 'moneybird', label: 'Eigen', indeling: {} })
-    for (const k of uitExport) expect(Object.keys(k)).not.toContain('token')
-
-    // Huishouden weg: de koppelingen gaan mee via de cascade (foreign_keys staat aan).
-    getDb().delete(households).where(eq(households.id, hh)).run()
-    expect(aantalRijen(hh)).toBe(0)
+    // Herstart: de oude rij is weg, dus er gebeurt niets meer; ook niet nadat de koppeling is verwijderd.
+    expect(await zetOmgevingskoppelingOver(env)).toBe('geen-oude-koppeling')
+    expect(await opslag.verwijderKoppeling(hh, id)).toBe(true)
+    expect(await zetOmgevingskoppelingOver(env)).toBe('geen-oude-koppeling')
+    expect(await opslag.lijstKoppelingen(hh)).toHaveLength(0)
+    expect(aantalRijen(beheerderHh)).toBe(0)
   })
 
   it('samen met het dossier: koppelingen in de export, weg met Alles verwijderen', async () => {
     zetMoneybirdFetch(nepMoneybird().fetch)
-    process.env.MONEYBIRD_TOKEN = NEP_TOKEN
-    process.env.MONEYBIRD_ADMINISTRATION_ID = NEP_ADM
     h.echt = true
     const { exporteer, huishoudenVan, verwijderAlles } = await import('@/lib/dossier/opslag')
     const u = getDb().insert(users).values({ email: 'dossier@example.nl', passwordHash: 'x', totpEnabled: true }).returning().get()
     const hh = await huishoudenVan(u.id)
-    await opslag.maakKoppeling(hh, { token: NEP_TOKEN, label: 'Eigen' })
-    await opslag.bewaarIndeling(hh, 'env', { '606': 'kosten' })
+    const { koppeling } = await opslag.maakKoppeling(hh, { token: NEP_TOKEN, label: 'Eigen', persoon: 'A' })
+    await opslag.bewaarIndeling(hh, Number(koppeling.id), { '606': 'kosten' })
 
     const exp = await exporteer(u.id)
     expect(JSON.stringify(exp)).not.toContain(NEP_TOKEN)
     const uitExport = exp.huishoudens[0].koppelingen
-    expect(uitExport.map((k) => k.id).sort()).toEqual([expect.stringMatching(/^\d+$/), 'env'])
-    expect(uitExport.find((k) => k.id === 'env')).toMatchObject({ soort: 'moneybird-env', indeling: { '606': 'kosten' } })
+    expect(uitExport).toHaveLength(1)
+    expect(uitExport[0]).toMatchObject({ id: koppeling.id, soort: 'moneybird', persoon: 'A', indeling: { '606': 'kosten' } })
 
     await verwijderAlles(u.id, false)
     expect(aantalRijen(hh)).toBe(0)

@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
-import { Download, FilePlus2, GitCompare, Link2, LogOut, Trash2 } from 'lucide-react'
+import { BookOpen, Download, FilePlus2, GitCompare, Link2, LogOut, Trash2, Users } from 'lucide-react'
 import type { Status } from '@/lib/tax/types'
 import type { JaarOverzicht } from '@/lib/dossier/opslag'
 import { Alert, Button, ButtonLink, Card, ChipGroup, Field, INVOER_KLASSE, Section, Select, StatusBadge, Toggle, cn, formatDatum, formatEuro, knopKlassen, veldIds } from '@/components/ui'
@@ -34,6 +34,8 @@ export interface OverzichtProps {
   herstelpunt?: ActiefHerstelpunt | null
   /** yyyy-mm-dd (Europe/Amsterdam), voor het voorgekozen nieuwe jaar. */
   vandaag?: string
+  /** Beheerder: link naar Accounts en de back-upkaart (een back-up bevat alle accounts). */
+  beheerder?: boolean
 }
 
 export function Overzicht(props: OverzichtProps) {
@@ -191,7 +193,7 @@ export function Overzicht(props: OverzichtProps) {
         </div>
       </Section>
 
-      <BackupKaart />
+      {props.beheerder && <BackupKaart />}
 
       <div className="flex flex-wrap gap-2">
         <ButtonLink href="/dossier/vergelijk/" variant="secundair">
@@ -201,6 +203,16 @@ export function Overzicht(props: OverzichtProps) {
         <ButtonLink href="/dossier/koppelingen/" variant="secundair">
           <Link2 aria-hidden="true" className="h-4 w-4" />
           Koppelingen
+        </ButtonLink>
+        {props.beheerder && (
+          <ButtonLink href="/beheer/" variant="secundair">
+            <Users aria-hidden="true" className="h-4 w-4" />
+            Accounts
+          </ButtonLink>
+        )}
+        <ButtonLink href="/handleiding/" variant="secundair">
+          <BookOpen aria-hidden="true" className="h-4 w-4" />
+          Handleiding
         </ButtonLink>
         {/* Download van een JSON-bestand, geen paginanavigatie: een gewone link is hier juist. */}
         {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}

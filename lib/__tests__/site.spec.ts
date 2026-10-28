@@ -61,7 +61,7 @@ describe('navigatie', () => {
 describe('sitemap en robots', () => {
   const urls = sitemap().map((e) => e.url)
   it('bevat de vaste routes en de rekentools', () => {
-    for (const r of ['/', '/2026', '/2027', '/jaarruimte', '/kinderopvangtoeslag', '/box-3', '/bv-of-eenmanszaak', '/middeling', '/kennisbank', '/over', '/privacy', '/disclaimer']) {
+    for (const r of ['/', '/2026', '/2027', '/jaarruimte', '/kinderopvangtoeslag', '/box-3', '/bv-of-eenmanszaak', '/middeling', '/kennisbank', '/over', '/handleiding', '/privacy', '/disclaimer']) {
       expect(urls).toContain(absoluteUrl(r))
     }
   })

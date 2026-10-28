@@ -24,7 +24,7 @@ export default async function SetupPagina() {
       <PageHeader
         kicker="Dossier"
         titel="Account maken"
-        intro="Het dossier heeft één account. Je gegevens worden versleuteld opgeslagen en zijn alleen bereikbaar met je wachtwoord en een code uit je authenticator-app."
+        intro="Dit eerste account wordt de beheerder; daarna nodig je anderen uit voor een eigen dossier. Je gegevens worden versleuteld opgeslagen en zijn alleen bereikbaar met je wachtwoord en een code uit je authenticator-app."
       />
       {afgerond ? (
         <Alert variant="info" titel="Er is al een account">

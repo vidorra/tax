@@ -54,8 +54,10 @@ const koppelingPad = (id: string) => `/api/dossier/koppelingen/${encodeURICompon
 export const koppelingenApi = {
   lijst: () => api<{ koppelingen: MbKoppelingPubliek[] }>('/api/dossier/koppelingen'),
   /** Het token gaat alleen in de body van dit verzoek mee en komt nooit terug. */
-  voegToe: (token: string, label: string) =>
-    api<{ koppeling: MbKoppelingPubliek; administraties: MbAdministratie[] }>('/api/dossier/koppelingen', { method: 'POST', body: { token, label } }),
+  voegToe: (token: string, label: string, persoon: 'A' | 'B' | null = null) =>
+    api<{ koppeling: MbKoppelingPubliek; administraties: MbAdministratie[] }>('/api/dossier/koppelingen', { method: 'POST', body: { token, label, persoon } }),
+  /** Van wie de administratie is (A, B of null), zonder Moneybird te vragen. */
+  zetPersoon: (id: string, persoon: 'A' | 'B' | null) => api<{ koppeling: MbKoppelingPubliek }>(koppelingPad(id), { method: 'PATCH', body: { persoon } }),
   kiesAdministratie: (id: string, administratieId: string, label?: string) =>
     api<{ koppeling: MbKoppelingPubliek }>(koppelingPad(id), { method: 'PATCH', body: label === undefined ? { administratieId } : { administratieId, label } }),
   verwijder: (id: string) => api<{ ok: true }>(koppelingPad(id), { method: 'DELETE' }),

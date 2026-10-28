@@ -152,25 +152,40 @@ describe('herindelen in de browser', () => {
 })
 
 describe('koppelingen en herkomst', () => {
-  const k = (id: string, administratieId: string | null): MbKoppelingPubliek => ({
+  const k = (id: string, administratieId: string | null, persoon: 'A' | 'B' | null = null): MbKoppelingPubliek => ({
     id,
     label: id,
-    bron: id === 'env' ? 'env' : 'dossier',
+    bron: 'dossier',
     tokenMasker: '••••abcd',
     administratieId,
     administratieNaam: administratieId ? `Adm ${administratieId}` : null,
     aangemaakt: null,
     laatstGebruikt: null,
+    persoon,
   })
 
   it('alleen koppelingen met een administratie zijn bruikbaar; de eerdere bron gaat voor', () => {
-    const lijst = [k('1', null), k('2', '20'), k('env', '30')]
-    expect(bruikbareKoppelingen(lijst).map((x) => x.id)).toEqual(['2', 'env'])
+    const lijst = [k('1', null), k('2', '20'), k('3', '30')]
+    expect(bruikbareKoppelingen(lijst).map((x) => x.id)).toEqual(['2', '3'])
     expect(voorkeurKoppeling(lijst, undefined)).toBe('2')
-    const bron = { soort: 'moneybird' as const, koppelingId: 'env', administratieId: '30', jaar: 2026, geimporteerdOp: '2027-02-01T10:00:00.000Z' }
-    expect(voorkeurKoppeling(lijst, bron)).toBe('env')
+    const bron = { soort: 'moneybird' as const, koppelingId: '3', administratieId: '30', jaar: 2026, geimporteerdOp: '2027-02-01T10:00:00.000Z' }
+    expect(voorkeurKoppeling(lijst, bron)).toBe('3')
     expect(voorkeurKoppeling(lijst, { ...bron, koppelingId: '1' })).toBe('2')
+    // Een bron uit de tijd van de koppeling uit de serverinstellingen ('env') bestaat niet meer: terug naar de voorkeur.
+    expect(voorkeurKoppeling(lijst, { ...bron, koppelingId: 'env' })).toBe('2')
     expect(voorkeurKoppeling([k('1', null)], undefined)).toBeNull()
+  })
+
+  it('van wie: de onderneming van een persoon kiest diens koppeling en nooit vanzelf die van de ander', () => {
+    const lijst = [k('1', '10', 'A'), k('2', '20', 'B'), k('3', '30', null)]
+    expect(voorkeurKoppeling(lijst, undefined, 'A')).toBe('1')
+    expect(voorkeurKoppeling(lijst, undefined, 'B')).toBe('2')
+    // Partner zonder eigen koppeling: een koppeling die aan niemand hangt, anders niets (zelf kiezen).
+    expect(voorkeurKoppeling([k('1', '10', 'A'), k('3', '30', null)], undefined, 'B')).toBe('3')
+    expect(voorkeurKoppeling([k('1', '10', 'A')], undefined, 'B')).toBeNull()
+    // Wat eerder is geïmporteerd, gaat voor, ook als het van de ander is.
+    const bron = { soort: 'moneybird' as const, koppelingId: '1', administratieId: '10', jaar: 2026, geimporteerdOp: '2027-02-01T10:00:00.000Z' }
+    expect(voorkeurKoppeling(lijst, bron, 'B')).toBe('1')
   })
 
   it('herkomstregel met een Nederlandse datum', () => {

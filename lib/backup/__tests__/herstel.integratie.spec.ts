@@ -65,13 +65,13 @@ describe('herstelBackup', () => {
     const regels: string[] = []
     const r = await herstelBackup(inhoud, { doel, log: (l) => regels.push(l) })
 
-    expect(r).toEqual({ rijen: inhoud.rijen, migratiesBackup: ['0001_init.sql'], latereMigraties: 0, vervangen: false, verdwenenAccounts: 0 })
+    expect(r).toEqual({ rijen: inhoud.rijen, migratiesBackup: ['0001_init.sql', '0002_accounts.sql'], latereMigraties: 0, vervangen: false, verdwenenAccounts: 0 })
     expect(regels[0]).toBe('Teruggezet:')
     expect(regels.join('\n')).toMatch(/dossier_years\s+2\n/)
     metDb(doel, (db) => {
       expect(tabelInhoud(db, { zonderSessie: true })).toEqual(tabelInhoud(getSqlite(), { zonderSessie: true }))
       expect(db.pragma('journal_mode', { simple: true })).toBe('wal')
-      expect(db.prepare('SELECT naam FROM _migrations').all()).toEqual([{ naam: '0001_init.sql' }])
+      expect(db.prepare('SELECT naam FROM _migrations ORDER BY naam').all()).toEqual([{ naam: '0001_init.sql' }, { naam: '0002_accounts.sql' }])
       const { g } = db.prepare('SELECT sessie_generatie AS g FROM users').get() as { g: number }
       expect(g).toBeGreaterThanOrEqual(1_000_000_002)
       expect(Number.isSafeInteger(g)).toBe(true)
@@ -207,7 +207,7 @@ describe('herstelBackup', () => {
     vulDatabase()
     getSqlite().prepare(`INSERT INTO _migrations (naam) VALUES ('0099_toekomst.sql')`).run()
     const inhoud = await maakSnapshot(getSqlite())
-    expect(inhoud.migraties).toEqual(['0001_init.sql', '0099_toekomst.sql'])
+    expect(inhoud.migraties).toEqual(['0001_init.sql', '0002_accounts.sql', '0099_toekomst.sql'])
     const doel = join(testDb.map, 'leeg', 'ibcalculator.db')
     const e = await fout(herstelBackup(inhoud, { doel }))
     expect(e).toBeInstanceOf(HerstelFout)
@@ -220,17 +220,17 @@ describe('herstelBackup', () => {
   it('een oudere back-up krijgt na het terugzetten de latere migraties van deze app', async () => {
     const inhoud = await backupMetGegevens()
     const map = mkdtempSync(join(testDb.map, 'migraties-'))
-    copyFileSync(join(MIGRATIE_MAP, '0001_init.sql'), join(map, '0001_init.sql'))
-    writeFileSync(join(map, '0002_later.sql'), `CREATE TABLE later_toegevoegd (id INTEGER PRIMARY KEY) STRICT;\nALTER TABLE users ADD COLUMN later TEXT NOT NULL DEFAULT 'ja';\n`)
+    for (const m of ['0001_init.sql', '0002_accounts.sql']) copyFileSync(join(MIGRATIE_MAP, m), join(map, m))
+    writeFileSync(join(map, '0098_later.sql'), `CREATE TABLE later_toegevoegd (id INTEGER PRIMARY KEY) STRICT;\nALTER TABLE users ADD COLUMN later TEXT NOT NULL DEFAULT 'ja';\n`)
     const doel = join(testDb.map, 'later', 'ibcalculator.db')
     migreer(doel, { map, log: stil })
 
     const regels: string[] = []
     const r = await herstelBackup(inhoud, { doel, migratieMap: map, log: (l) => regels.push(l) })
     expect(r.latereMigraties).toBe(1)
-    expect(regels).toContain('  Migratie uitgevoerd: 0002_later.sql')
+    expect(regels).toContain('  Migratie uitgevoerd: 0098_later.sql')
     metDb(doel, (db) => {
-      expect((db.prepare('SELECT naam FROM _migrations ORDER BY naam').all() as Array<{ naam: string }>).map((x) => x.naam)).toEqual(['0001_init.sql', '0002_later.sql'])
+      expect((db.prepare('SELECT naam FROM _migrations ORDER BY naam').all() as Array<{ naam: string }>).map((x) => x.naam)).toEqual(['0001_init.sql', '0002_accounts.sql', '0098_later.sql'])
       expect(db.prepare('SELECT email, later FROM users').get()).toEqual({ email: GEBRUIKER_MAIL, later: 'ja' })
     })
   })
@@ -274,7 +274,7 @@ describe('openBackupDatabase en trekSessiesIn', () => {
     const b = openBackupDatabase(inhoud, null)
     try {
       expect(b.rijen).toEqual(inhoud.rijen)
-      expect(b.migraties).toEqual(['0001_init.sql'])
+      expect(b.migraties).toEqual(['0001_init.sql', '0002_accounts.sql'])
     } finally {
       b.opruimen()
     }

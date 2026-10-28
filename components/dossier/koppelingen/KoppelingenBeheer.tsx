@@ -21,7 +21,18 @@ function administratieOpties(lijst: MbAdministratie[]) {
   return lijst.map((a) => ({ value: a.id, label: a.naam }))
 }
 
-export function KoppelingenBeheer() {
+export type PersoonNamen = { A: string; B: string }
+
+type Persoon = 'A' | 'B'
+
+function persoonOpties(namen: PersoonNamen) {
+  return [
+    { value: 'A', label: namen.A },
+    { value: 'B', label: namen.B },
+  ]
+}
+
+export function KoppelingenBeheer({ namen = { A: 'Persoon A', B: 'Persoon B' } }: { namen?: PersoonNamen }) {
   const { koppelingen, laden, fout: laadFout, vernieuw } = useKoppelingen()
 
   return (
@@ -33,6 +44,10 @@ export function KoppelingenBeheer() {
           de omzet per klant en je geregistreerde uren. Je controleert de indeling en neemt de cijfers daarna over in een onderneming in je dossier.
         </p>
         <p className="mt-2 text-sm leading-relaxed text-gray-700">De koppeling leest alleen. Er wordt niets aangemaakt, gewijzigd of verwijderd in Moneybird.</p>
+        <p className="mt-2 text-sm leading-relaxed text-gray-700">
+          Heeft je partner een eigen Moneybird-administratie? Voeg dan een tweede koppeling toe met het token van je partner en kies bij Van wie? je partner. De onderneming van je partner
+          gebruikt dan die koppeling.
+        </p>
 
         <h3 className="mt-5 text-sm font-medium text-gray-900">Een token maken in Moneybird</h3>
         <ol className="mt-2 list-decimal space-y-1.5 pl-5 text-sm leading-relaxed text-gray-700">
@@ -70,26 +85,32 @@ export function KoppelingenBeheer() {
           <ul className="space-y-4" aria-label="Moneybird-koppelingen">
             {koppelingen.map((k) => (
               <li key={k.id}>
-                <KoppelingKaart koppeling={k} onGewijzigd={vernieuw} />
+                <KoppelingKaart koppeling={k} namen={namen} onGewijzigd={vernieuw} />
               </li>
             ))}
           </ul>
         )}
       </Section>
 
-      <NieuweKoppeling onGewijzigd={vernieuw} />
+      <NieuweKoppeling namen={namen} onGewijzigd={vernieuw} />
     </div>
   )
 }
 
-function KoppelingKaart({ koppeling: k, onGewijzigd }: { koppeling: MbKoppelingPubliek; onGewijzigd: () => Promise<void> }) {
+function KoppelingKaart({ koppeling: k, namen, onGewijzigd }: { koppeling: MbKoppelingPubliek; namen: PersoonNamen; onGewijzigd: () => Promise<void> }) {
   const basis = useId().replace(/:/g, '')
   const [modus, setModus] = useState<'rust' | 'administratie' | 'verwijderen'>('rust')
   const [administraties, setAdministraties] = useState<MbAdministratie[] | null>(null)
   const [keuze, setKeuze] = useState('')
   const [bezig, setBezig] = useState(false)
   const [fout, setFout] = useState<string | null>(null)
-  const env = k.bron === 'env'
+
+  async function zetPersoon(p: string) {
+    setFout(null)
+    const r = await koppelingenApi.zetPersoon(k.id, p === 'A' || p === 'B' ? p : null)
+    if (!r.ok) return setFout(r.fout ?? 'Opslaan is niet gelukt.')
+    await onGewijzigd()
+  }
 
   async function openAdministraties() {
     setModus('administratie')
@@ -128,7 +149,6 @@ function KoppelingKaart({ koppeling: k, onGewijzigd }: { koppeling: MbKoppelingP
         <h3 id={`${basis}-naam`} className="min-w-0 break-words text-base font-medium text-gray-900">
           {k.label}
         </h3>
-        {env && <span className="rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-700">ingesteld op de server</span>}
       </div>
       <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
         <div className="min-w-0">
@@ -152,13 +172,16 @@ function KoppelingKaart({ koppeling: k, onGewijzigd }: { koppeling: MbKoppelingP
           </div>
         )}
       </dl>
+      <div className="mt-3 max-w-xs">
+        <Select
+          label="Van wie?"
+          value={k.persoon ?? ''}
+          onChange={(v) => void zetPersoon(v)}
+          options={[{ value: '', label: 'Nog niet gekozen' }, ...persoonOpties(namen)]}
+        />
+      </div>
 
-      {env ? (
-        <p className="mt-3 text-xs text-gray-500">
-          Deze koppeling komt uit de serverinstellingen (MONEYBIRD_TOKEN en MONEYBIRD_ADMINISTRATION_ID). Wijzigen of verwijderen doe je daar.
-        </p>
-      ) : (
-        <>
+      <>
           {modus === 'rust' && (
             <div className="mt-4 flex flex-wrap gap-2 border-t border-gray-100 pt-4">
               <Button variant="secundair" grootte="sm" onClick={openAdministraties}>
@@ -216,8 +239,7 @@ function KoppelingKaart({ koppeling: k, onGewijzigd }: { koppeling: MbKoppelingP
               </div>
             </div>
           )}
-        </>
-      )}
+      </>
 
       {fout && (
         <Alert variant="let-op" role="alert" className="mt-3">
@@ -228,11 +250,12 @@ function KoppelingKaart({ koppeling: k, onGewijzigd }: { koppeling: MbKoppelingP
   )
 }
 
-function NieuweKoppeling({ onGewijzigd }: { onGewijzigd: () => Promise<void> }) {
+function NieuweKoppeling({ namen, onGewijzigd }: { namen: PersoonNamen; onGewijzigd: () => Promise<void> }) {
   const labelIds = veldIds('koppeling-label')
   const tokenIds = veldIds('koppeling-token')
   const [label, setLabel] = useState('Moneybird')
   const [token, setToken] = useState('')
+  const [persoon, setPersoon] = useState<Persoon>('A')
   const [bezig, setBezig] = useState(false)
   const [fout, setFout] = useState<string | null>(null)
   const [melding, setMelding] = useState<string | null>(null)
@@ -245,7 +268,7 @@ function NieuweKoppeling({ onGewijzigd }: { onGewijzigd: () => Promise<void> }) 
     setBezig(true)
     setFout(null)
     setMelding(null)
-    const r = await koppelingenApi.voegToe(token.trim(), label.trim() || 'Moneybird')
+    const r = await koppelingenApi.voegToe(token.trim(), label.trim() || 'Moneybird', persoon)
     setBezig(false)
     if (!r.ok || !r.data) return setFout(r.fout ?? 'Toevoegen is niet gelukt.')
     setToken('')
@@ -311,6 +334,7 @@ function NieuweKoppeling({ onGewijzigd }: { onGewijzigd: () => Promise<void> }) 
                 className={cn(INVOER_KLASSE, 'border-gray-200 px-3.5 hover:border-gray-300')}
               />
             </Field>
+            <Select label="Van wie?" hint="De onderneming van deze persoon gebruikt deze koppeling." value={persoon} onChange={(v) => setPersoon(v === 'B' ? 'B' : 'A')} options={persoonOpties(namen)} />
             <Field ids={tokenIds} label="Persoonlijk API-token" verplicht hint="Wordt versleuteld opgeslagen en daarna niet meer getoond.">
               <input
                 id={tokenIds.invoer}

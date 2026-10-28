@@ -99,10 +99,10 @@ describe('CLI op een echte database', () => {
     expect(bekeken.code, bekeken.tekst).toBe(0)
     expect(bekeken.tekst).toContain('Formaatversie:  2')
     expect(bekeken.tekst).toContain('Versie app:     abc1234')
-    expect(bekeken.tekst).toContain('Migraties:      0001_init.sql')
+    expect(bekeken.tekst).toContain('Migraties:      0001_init.sql, 0002_accounts.sql')
     expect(bekeken.tekst).toMatch(/Database: {7}[\d,.]+ kB \(SQLite\)/)
     expect(bekeken.tekst).toMatch(/dossier_years\s+2\n/)
-    expect(bekeken.tekst).toMatch(/totaal\s+7 rijen in 8 tabellen/)
+    expect(bekeken.tekst).toMatch(/totaal\s+7 rijen in 9 tabellen/)
     expect(bekeken.tekst).toContain('Controle:       in orde')
 
     // Terugzetten in een nieuw bestand geeft dezelfde rijen en trekt alle sessies in.

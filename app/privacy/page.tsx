@@ -32,6 +32,8 @@ export default function PrivacyPagina() {
         <ul>
           <li>Inloggen gaat met een wachtwoord en een tweede factor (een code uit een authenticator-app).</li>
           <li>Je invoer wordt versleuteld opgeslagen. De database is niet van buitenaf bereikbaar.</li>
+          <li>Een account krijg je via een uitnodiging van de beheerder. Elk account ziet alleen zijn eigen dossier; ook de beheerder kan in de tool niet in jouw dossier kijken.</li>
+          <li>Een Moneybird-token bewaren we versleuteld en tonen we daarna alleen gemaskeerd.</li>
           <li>We vragen nooit om je BSN of volledige rekeningnummers. Rekeningen geef je een eigen naam, zoals &quot;spaarrekening&quot;.</li>
           <li>Je kunt je dossier exporteren en volledig laten verwijderen.</li>
         </ul>

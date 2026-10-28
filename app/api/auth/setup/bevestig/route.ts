@@ -4,6 +4,7 @@ import { loginLimiter } from '@/lib/auth/rate-limit'
 import { SETUP_COOKIE } from '@/lib/auth/sessie'
 import { leesToken, wisCookie, zetSessie } from '@/lib/auth/server'
 import { codeAlGebruikt, verifieerTotp } from '@/lib/auth/totp'
+import { totpGeheimVan } from '@/lib/auth/totp-opslag'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -26,7 +27,7 @@ export async function POST(req: Request) {
     const gebruiker = await gebruikerOpId(token.userId)
     if (!gebruiker) return fout(401, 'De installatie is verlopen. Begin opnieuw.')
     if (gebruiker.totpEnabled) return fout(403, 'Tweestapsverificatie staat al aan. Log in om verder te gaan.')
-    const stap = verifieerTotp(gebruiker.totpSecret, body?.code)
+    const stap = verifieerTotp(totpGeheimVan(gebruiker), body?.code)
     if (stap === null || codeAlGebruikt(gebruiker.id, stap)) {
       limiet.mislukt(sleutel)
       return fout(401, 'Deze code klopt niet. Controleer de tijd op je telefoon en probeer de volgende code.')

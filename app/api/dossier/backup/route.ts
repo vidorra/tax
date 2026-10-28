@@ -1,10 +1,11 @@
 /**
  * Back-up van de database vanuit het dossier: GET geeft de status voor de kaart, POST mailt nu een back-up.
  * De ontvanger gaat alleen gemaskeerd naar de browser; de SHA-256 en het bestand zelf niet.
+ * Alleen voor beheerders: een back-up bevat de dossiers van alle accounts en gaat naar BACKUP_MAIL_TO.
  */
 import { fout, json } from '@/lib/auth/api'
 import { backupStatus, handmatigeBackup } from '@/lib/backup/service'
-import { metDossier } from '@/lib/dossier/route'
+import { metBeheerder } from '@/app/api/beheer/hulp'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -12,13 +13,14 @@ export const dynamic = 'force-dynamic'
 /** Seconden voordat een nieuwe back-up op verzoek weer mag (maximaal drie per uur). */
 const WACHT_TE_VAAK = 3600
 
-export async function GET() {
-  return metDossier('backup GET', async () => json(await backupStatus()))
+export async function GET(req: Request) {
+  return metBeheerder('backup GET', req, async () => json(await backupStatus()))
 }
 
 export async function POST(req: Request) {
-  return metDossier(
+  return metBeheerder(
     'backup POST',
+    req,
     async () => {
       const r = await handmatigeBackup()
       if ('geweigerd' in r) {
@@ -31,6 +33,5 @@ export async function POST(req: Request) {
       const { status, reden, bestandsnaam, bytes } = r
       return json({ resultaat: { status, reden, bestandsnaam, bytes }, backup: await backupStatus() })
     },
-    req,
   )
 }

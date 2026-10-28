@@ -41,6 +41,13 @@ vi.mock('@/lib/auth/gebruiker', () => ({
     const u = gebruikers.get(id)
     if (u) u.sessieGeneratie += 1
   },
+  raakIngelogd: async () => undefined,
+}))
+
+// Het omzetten van een oud, leesbaar TOTP-geheim schrijft naar de database; deze tests hebben er geen.
+vi.mock('@/lib/auth/totp-opslag', async (orig) => ({
+  ...(await orig<typeof import('@/lib/auth/totp-opslag')>()),
+  versleutelTotpVan: () => undefined,
 }))
 
 vi.mock('@/lib/auth/wachtwoord', async (orig) => ({

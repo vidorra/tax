@@ -17,7 +17,7 @@ export const TOTP_GEHEIM = 'JBSWY3DPEHPK3PXPGEHEIM'
 export const MB_TOKEN = 'mb-token-0123456789abcdefGEHEIM'
 
 /** Tabellen van het dossier (alles behalve backups en _migrations), in de volgorde van de migratie. */
-export const TABELLEN = ['users', 'households', 'dossier_years', 'snapshots', 'accountant_docs', 'aangifte_staat', 'herstelpunten', 'koppelingen'] as const
+export const TABELLEN = ['users', 'households', 'dossier_years', 'snapshots', 'accountant_docs', 'aangifte_staat', 'herstelpunten', 'koppelingen', 'uitnodigingen'] as const
 
 /** Complete back-upconfiguratie met Resend; SMTP-variabelen weg. DATABASE_PATH laat hij aan testdb.ts. */
 export function zetBackupEnv(sleutel: string): void {

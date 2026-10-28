@@ -9,7 +9,8 @@
  * één moment zien. De `*Tx`-functies zijn synchroon en draaien in de transactie van de aanroeper (de JSON-import doet
  * zo toevoegen, vervangen, accountantsregels, aangiftestaat en herstelpunt in één transactie).
  */
-import { and, asc, desc, eq, inArray } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, ne } from 'drizzle-orm'
+import { trekUitnodigingenIn } from '@/lib/auth/gebruiker'
 import { dbFoutSoort, getDb, leegWal, lees, schrijf, type Db, type Tx } from '@/lib/db'
 import { aangifteStaat, accountantDocs, dossierYears, households, koppelingen, snapshots, users, type DossierJaarRij } from '@/lib/db/schema'
 import { ontsleutel, paramsHash, versleutel } from '@/lib/crypto'
@@ -534,8 +535,26 @@ export async function exporteer(userId: number) {
  * herhaalpogingen als een ander proces de WAL nog gebruikt. Lukt dat niet, dan is het dossier wel verwijderd, staat er
  * een waarschuwing in de log en blijven die pagina's (versleuteld) in -wal tot een volgende geslaagde checkpoint.
  */
+/** Alles verwijderen met account, terwijl je de laatste beheerder bent en er andere accounts zijn. */
+export class LaatsteBeheerderFout extends Error {
+  constructor(melding: string) {
+    super(melding)
+    this.name = 'LaatsteBeheerderFout'
+  }
+}
+
 export async function verwijderAlles(userId: number, ookAccount: boolean): Promise<void> {
   schrijf((tx) => {
+    if (ookAccount) {
+      // De laatste beheerder mag niet weg zolang er andere accounts zijn: dan kan niemand meer uitnodigen of herstellen.
+      const ik = tx.select({ rol: users.rol }).from(users).where(eq(users.id, userId)).get()
+      const anderen = tx.select({ id: users.id, rol: users.rol }).from(users).where(and(ne(users.id, userId), eq(users.totpEnabled, true))).all()
+      if (ik?.rol === 'beheerder' && anderen.length > 0 && !anderen.some((a) => a.rol === 'beheerder')) {
+        throw new LaatsteBeheerderFout('Je bent de enige beheerder. Maak eerst iemand anders beheerder (bij Accounts) voordat je je account verwijdert.')
+      }
+      // Eigen links in; gaat het laatste account weg (setup gaat weer open), dan alle open links.
+      trekUitnodigingenIn(tx, anderen.length === 0 ? null : userId)
+    }
     tx.delete(koppelingen).where(inArray(koppelingen.householdId, tx.select({ id: households.id }).from(households).where(eq(households.userId, userId)))).run()
     tx.delete(households).where(eq(households.userId, userId)).run()
     if (ookAccount) tx.delete(users).where(eq(users.id, userId)).run()

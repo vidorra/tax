@@ -14,6 +14,7 @@ vi.mock('next/font/google', () => ({ Lexend_Deca: () => ({ variable: 'font', cla
 
 const PAGINAS: Record<string, () => Promise<{ metadata: Metadata }>> = {
   '/over/': () => import('@/app/over/page'),
+  '/handleiding/': () => import('@/app/handleiding/page'),
   '/privacy/': () => import('@/app/privacy/page'),
   '/disclaimer/': () => import('@/app/disclaimer/page'),
   '/jaarruimte/': () => import('@/app/jaarruimte/page'),

@@ -5,8 +5,7 @@
  *  1. De gebruiker maakt in Moneybird een persoonlijke API-token (Instellingen > Ontwikkelaars) met de
  *     scopes `sales_invoices`, `documents`, `bank`, `time_entries` en `settings`, en voegt die in het dossier
  *     toe als koppeling. Het token wordt versleuteld opgeslagen (lib/crypto.ts, met AAD) en nooit naar de
- *     browser teruggestuurd. Daarnaast kan de server een koppeling uit de omgeving hebben:
- *     MONEYBIRD_TOKEN + MONEYBIRD_ADMINISTRATION_ID, id 'env'.
+ *     browser teruggestuurd. Elke koppeling hoort bij één huishouden (account) en kan aan persoon A of B hangen.
  *  2. Per koppeling kiest de gebruiker één administratie (één onderneming).
  *  3. Per dossierjaar en onderneming haalt de server de cijfers op en zet ze om in een MbJaarImport:
  *     winst- en verliesrekening per grootboekrekening met een voorgestelde fiscale categorie (op basis van
@@ -69,16 +68,18 @@ export interface MbAdministratie {
 }
 
 export interface MbKoppelingPubliek {
-  /** Database-id als string, of 'env' voor de koppeling uit de omgeving. */
+  /** Database-id als string. */
   id: string
   label: string
-  bron: 'dossier' | 'env'
+  bron: 'dossier'
   /** Gemaskeerd token, bijvoorbeeld '••••••3f9a'. Het echte token komt nooit naar de browser. */
   tokenMasker: string
   administratieId: string | null
   administratieNaam: string | null
   aangemaakt: string | null
   laatstGebruikt: string | null
+  /** Van wie de administratie is: persoon A of B in het dossier; null = niet gekozen. */
+  persoon: 'A' | 'B' | null
 }
 
 export interface MbGrootboekRegel {

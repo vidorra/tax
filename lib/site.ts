@@ -91,6 +91,7 @@ export interface FooterLink {
 
 export const FOOTER_LINKS: FooterLink[] = [
   { href: '/over', label: 'Over deze tool' },
+  { href: '/handleiding', label: 'Handleiding' },
   { href: '/privacy', label: 'Privacy' },
   { href: '/disclaimer', label: 'Disclaimer' },
   { href: '/kennisbank', label: 'Kennisbank' },
@@ -118,6 +119,7 @@ export const PUBLIEKE_ROUTES: Array<{ href: string; prioriteit: number; frequent
   { href: '/middeling', prioriteit: 0.6, frequentie: 'monthly' },
   { href: '/kennisbank', prioriteit: 0.7, frequentie: 'weekly' },
   { href: '/over', prioriteit: 0.3, frequentie: 'yearly' },
+  { href: '/handleiding', prioriteit: 0.3, frequentie: 'monthly' },
   { href: '/privacy', prioriteit: 0.2, frequentie: 'yearly' },
   { href: '/disclaimer', prioriteit: 0.2, frequentie: 'yearly' },
 ]

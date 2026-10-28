@@ -5,6 +5,8 @@
  *  ib-sessie  volledige sessie na wachtwoord en 2FA, 7 dagen
  *  ib-2fa     tussenstap na een goed wachtwoord, 5 minuten
  *  ib-setup   tussenstap bij het aanmaken van het account, 15 minuten
+ *  ib-instellen  tussenstap bij het instellen via een uitnodiging of herstellink, 15 minuten. Het onderwerp is het
+ *             id van de uitnodiging (het account bestaat dan nog niet), niet van een account.
  */
 import { SignJWT, jwtVerify } from 'jose'
 import { MIN_AUTH_SECRET } from './grenzen'
@@ -12,14 +14,16 @@ import { MIN_AUTH_SECRET } from './grenzen'
 export const SESSIE_COOKIE = 'ib-sessie'
 export const TWEEFA_COOKIE = 'ib-2fa'
 export const SETUP_COOKIE = 'ib-setup'
+export const INSTELLEN_COOKIE = 'ib-instellen'
 
 export const SESSIE_DUUR = 60 * 60 * 24 * 7
 export const TWEEFA_DUUR = 60 * 5
 export const SETUP_DUUR = 60 * 15
+export const INSTELLEN_DUUR = 60 * 15
 
-export type TokenSoort = 'sessie' | '2fa' | 'setup'
+export type TokenSoort = 'sessie' | '2fa' | 'setup' | 'instellen'
 
-const DUUR: Record<TokenSoort, number> = { sessie: SESSIE_DUUR, '2fa': TWEEFA_DUUR, setup: SETUP_DUUR }
+const DUUR: Record<TokenSoort, number> = { sessie: SESSIE_DUUR, '2fa': TWEEFA_DUUR, setup: SETUP_DUUR, instellen: INSTELLEN_DUUR }
 
 const ISSUER = 'ibcalculator'
 

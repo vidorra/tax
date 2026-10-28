@@ -6,31 +6,29 @@
  *   pas na de insert bekend is, gebeurt de insert met een tijdelijke waarde en direct daarna, in
  *   dezelfde transactie, de update met de echte ciphertext.
  * - Het token komt nooit buiten deze module en de import; naar de browser gaat alleen een masker.
- * - De koppeling uit de omgeving (MONEYBIRD_TOKEN + MONEYBIRD_ADMINISTRATION_ID, id 'env') staat niet in
- *   de database en kan niet worden verwijderd. Haar indeling bewaren we in een rij met soort
- *   'moneybird-env' zonder token: zo staat alle Moneybird-informatie in één tabel, gaat ze mee in de
- *   export en verdwijnt ze via de cascade als het huishouden wordt verwijderd.
+ * - Elke koppeling hoort bij een huishouden (dus bij één account) en kan aan persoon A of B van het dossier hangen, zodat
+ *   je partner een eigen administratie koppelt. Een token uit de serverinstellingen (MONEYBIRD_TOKEN) bestaat niet
+ *   meer: dat gold voor elk account. lib/moneybird/omgeving-overzetten.ts zet zo'n token bij de start één keer om naar
+ *   een versleutelde koppeling van de beheerder.
  *
  * Gelijktijdigheid: alles wat eerst leest en daarna schrijft, gebeurt in één synchrone schrijf() (BEGIN
  * IMMEDIATE, zie lib/db). Het maximum van tien koppelingen, de ene omgevingsrij per huishouden en het
  * samenvoegen van de indeling kunnen zo niet door een gelijktijdig verzoek of een ander proces worden
- * doorkruist. Moneybird aanroepen gebeurt altijd vóór of na zo'n transactie, nooit erin. De partiële unieke
- * index koppelingen_env_uniek blijft de vangrail voor de omgevingsrij. Id's zijn AUTOINCREMENT en worden dus
- * nooit hergebruikt: een update op een id dat intussen is verwijderd, raakt geen andere koppeling.
+ * doorkruist. Moneybird aanroepen gebeurt altijd vóór of na zo'n transactie, nooit erin. Id's zijn AUTOINCREMENT en
+ * worden dus nooit hergebruikt: een update op een id dat intussen is verwijderd, raakt geen andere koppeling.
  */
 import { and, asc, count, eq } from 'drizzle-orm'
 import { getDb, lees, schrijf, type Db, type Tx } from '@/lib/db'
 import { koppelingen, type KoppelingRij } from '@/lib/db/schema'
 import { ontsleutel, versleutel } from '@/lib/crypto'
-import { geldigMbId, maakClient, maskeer, type MbOpties } from './client'
+import { maakClient, maskeer, type MbOpties } from './client'
 import { MAX_INDELING_REGELS, schoonIndeling } from './indeling'
 import type { MbAdministratie, MbIndeling, MbKoppelingPubliek, MbIndelingWijziging } from './types'
 
 export const MAX_KOPPELINGEN = 10
-export const ENV_ID = 'env'
 const SOORT = 'moneybird'
-const SOORT_ENV = 'moneybird-env'
-const ENV_LABEL = 'Moneybird (server)'
+
+export type KoppelingPersoon = 'A' | 'B'
 
 /** De verbinding (getDb()) of een transactie uit schrijf()/lees(); de queries hieronder zijn synchroon. */
 type Lezer = Db | Tx
@@ -50,21 +48,19 @@ export class KoppelingFout extends Error {
   }
 }
 
-export type KoppelingId = typeof ENV_ID | number
+export type KoppelingId = number
 
-/** Id uit de URL: 'env' of een positief geheel getal; anders null. */
+/** Id uit de URL: een positief geheel getal; anders null. */
 export function koppelingIdUitPad(ruw: string): KoppelingId | null {
-  if (ruw === ENV_ID) return ENV_ID
   if (!/^[1-9]\d{0,8}$/.test(ruw)) return null
   return Number(ruw)
 }
 
-/** De koppeling uit de omgeving, als beide variabelen zijn gezet. */
-export function envKoppeling(env: Record<string, string | undefined> = process.env): { token: string; administratieId: string } | null {
-  const token = env.MONEYBIRD_TOKEN?.trim()
-  const administratieId = env.MONEYBIRD_ADMINISTRATION_ID?.trim()
-  if (!token || !administratieId || !geldigMbId(administratieId)) return null
-  return { token, administratieId }
+/** Persoon uit een verzoek: 'A', 'B' of null (niet gekozen); undefined bij een ongeldige waarde. */
+export function schoonPersoon(x: unknown): KoppelingPersoon | null | undefined {
+  if (x === null || x === '') return null
+  if (x === 'A' || x === 'B') return x
+  return undefined
 }
 
 /** Token uit een verzoek: 10 tot 200 tekens zonder spaties of vreemde tekens. */
@@ -105,35 +101,11 @@ function publiek(rij: KoppelingRij): MbKoppelingPubliek {
     administratieNaam: rij.administratieNaam,
     aangemaakt: rij.aangemaakt.toISOString(),
     laatstGebruikt: rij.laatstGebruikt ? rij.laatstGebruikt.toISOString() : null,
+    persoon: rij.persoon ?? null,
   }
 }
 
 const vanHuishouden = (householdId: number, soort: string) => and(eq(koppelingen.householdId, householdId), eq(koppelingen.soort, soort))
-
-function envRij(db: Lezer, householdId: number): KoppelingRij | null {
-  return db.select().from(koppelingen).where(vanHuishouden(householdId, SOORT_ENV)).limit(1).get() ?? null
-}
-
-/**
- * Binnen schrijf(): de rij van de omgevingskoppeling, aangemaakt als hij nog niet bestaat. Doordat lezen en
- * aanmaken in dezelfde BEGIN IMMEDIATE-transactie gebeuren, ontstaat er per huishouden maar één.
- */
-function zorgEnvRijTx(tx: Tx, householdId: number): KoppelingRij {
-  return envRij(tx, householdId) ?? tx.insert(koppelingen).values({ householdId, soort: SOORT_ENV, label: ENV_LABEL, tokenEnc: '' }).returning().get()
-}
-
-function envPubliek(env: { token: string; administratieId: string }, rij: KoppelingRij | null): MbKoppelingPubliek {
-  return {
-    id: ENV_ID,
-    label: ENV_LABEL,
-    bron: 'env',
-    tokenMasker: maskeer(env.token),
-    administratieId: env.administratieId,
-    administratieNaam: rij?.administratieNaam ?? null,
-    aangemaakt: null,
-    laatstGebruikt: rij?.laatstGebruikt ? rij.laatstGebruikt.toISOString() : null,
-  }
-}
 
 function rijVan(db: Lezer, householdId: number, id: number): KoppelingRij | null {
   return (
@@ -147,15 +119,8 @@ function rijVan(db: Lezer, householdId: number, id: number): KoppelingRij | null
 }
 
 export async function lijstKoppelingen(householdId: number): Promise<MbKoppelingPubliek[]> {
-  const env = envKoppeling()
-  // Eén leesmoment, zodat omgevingsrij en koppelingen bij elkaar horen.
-  const { omgeving, rijen } = lees((tx) => ({
-    omgeving: env ? envRij(tx, householdId) : null,
-    rijen: tx.select().from(koppelingen).where(vanHuishouden(householdId, SOORT)).orderBy(asc(koppelingen.id)).all(),
-  }))
-  const uit: MbKoppelingPubliek[] = env ? [envPubliek(env, omgeving)] : []
-  uit.push(...rijen.map(publiek))
-  return uit
+  const rijen = lees((tx) => tx.select().from(koppelingen).where(vanHuishouden(householdId, SOORT)).orderBy(asc(koppelingen.id)).all())
+  return rijen.map(publiek)
 }
 
 /**
@@ -168,7 +133,7 @@ export async function lijstKoppelingen(householdId: number): Promise<MbKoppeling
  */
 export async function maakKoppeling(
   householdId: number,
-  invoer: { token: string; label: string },
+  invoer: { token: string; label: string; persoon?: KoppelingPersoon | null },
   opties: MbOpties = {},
 ): Promise<{ koppeling: MbKoppelingPubliek; administraties: MbAdministratie[] }> {
   const administraties = await maakClient(invoer.token, null, opties).administraties()
@@ -178,7 +143,7 @@ export async function maakKoppeling(
     if (aantal >= MAX_KOPPELINGEN) throw new KoppelingFout(409, `Je kunt maximaal ${MAX_KOPPELINGEN} koppelingen hebben. Verwijder er eerst een.`)
     const { id } = tx
       .insert(koppelingen)
-      .values({ householdId, soort: SOORT, label: invoer.label, tokenEnc: 'tijdelijk', administratieId: enige?.id ?? null, administratieNaam: enige?.naam ?? null })
+      .values({ householdId, soort: SOORT, label: invoer.label, tokenEnc: 'tijdelijk', administratieId: enige?.id ?? null, administratieNaam: enige?.naam ?? null, persoon: invoer.persoon ?? null })
       .returning({ id: koppelingen.id })
       .get()
     const klaar = tx
@@ -212,14 +177,6 @@ export async function kiesAdministratie(
   label: string | undefined,
   opties: MbOpties = {},
 ): Promise<MbKoppelingPubliek | null> {
-  if (id === ENV_ID) {
-    const env = envKoppeling()
-    if (!env) return null
-    if (administratieId !== env.administratieId || label !== undefined) {
-      throw new KoppelingFout(409, 'De koppeling uit de omgeving gebruikt altijd MONEYBIRD_ADMINISTRATION_ID en kan hier niet worden aangepast.')
-    }
-    return envPubliek(env, envRij(getDb(), householdId))
-  }
   const rij = rijVan(getDb(), householdId, id)
   if (!rij) return null
   const administraties = await maakClient(tokenUit(rij), null, opties).administraties()
@@ -234,8 +191,26 @@ export async function kiesAdministratie(
   return bij ? publiek(bij) : null
 }
 
+/** Label en/of persoon wijzigen, zonder Moneybird te vragen. null als de koppeling niet bestaat. */
+export async function wijzigKoppeling(householdId: number, id: KoppelingId, wijziging: { label?: string; persoon?: KoppelingPersoon | null }): Promise<MbKoppelingPubliek | null> {
+  const set = {
+    ...(wijziging.label !== undefined ? { label: wijziging.label } : {}),
+    ...(wijziging.persoon !== undefined ? { persoon: wijziging.persoon } : {}),
+  }
+  if (Object.keys(set).length === 0) {
+    const rij = rijVan(getDb(), householdId, id)
+    return rij ? publiek(rij) : null
+  }
+  const bij = getDb()
+    .update(koppelingen)
+    .set(set)
+    .where(and(eq(koppelingen.id, id), vanHuishouden(householdId, SOORT)))
+    .returning()
+    .get()
+  return bij ? publiek(bij) : null
+}
+
 export async function verwijderKoppeling(householdId: number, id: KoppelingId): Promise<boolean> {
-  if (id === ENV_ID) throw new KoppelingFout(409, 'De koppeling uit de omgeving kan niet worden verwijderd. Haal MONEYBIRD_TOKEN weg uit de serverinstellingen.')
   const weg = getDb()
     .delete(koppelingen)
     .where(and(eq(koppelingen.id, id), vanHuishouden(householdId, SOORT)))
@@ -249,25 +224,13 @@ export interface GeladenKoppeling {
   /** Server-only. Nooit loggen of terugsturen. */
   token: string
   administratie: MbAdministratie | null
-  /** false als de naam van de administratie nog niet bekend is (omgevingskoppeling vóór de eerste import). */
+  /** false als de naam van de administratie nog niet bekend is. */
   naamBekend: boolean
   label: string
 }
 
 /** Token en administratie van een koppeling (server-only); null als die niet bestaat. */
 export async function laadKoppeling(householdId: number, id: KoppelingId): Promise<GeladenKoppeling | null> {
-  if (id === ENV_ID) {
-    const env = envKoppeling()
-    if (!env) return null
-    const rij = envRij(getDb(), householdId)
-    return {
-      id: ENV_ID,
-      token: env.token,
-      administratie: { id: env.administratieId, naam: rij?.administratieNaam ?? `Administratie ${env.administratieId}` },
-      naamBekend: Boolean(rij?.administratieNaam),
-      label: ENV_LABEL,
-    }
-  }
   const rij = rijVan(getDb(), householdId, id)
   if (!rij) return null
   return {
@@ -279,7 +242,7 @@ export async function laadKoppeling(householdId: number, id: KoppelingId): Promi
   }
 }
 
-function indelingUit(rij: KoppelingRij | null): MbIndeling {
+export function indelingUit(rij: KoppelingRij | null): MbIndeling {
   if (!rij?.indelingEnc) return {}
   const ruw = ontsleutel<unknown>(rij.indelingEnc, aadKoppeling.indeling(rij.householdId, rij.id))
   const schoon = schoonIndeling(ruw)
@@ -291,7 +254,6 @@ function indelingUit(rij: KoppelingRij | null): MbIndeling {
 
 /** Bewaarde indeling; null als de koppeling niet bestaat. */
 export async function laadIndeling(householdId: number, id: KoppelingId): Promise<MbIndeling | null> {
-  if (id === ENV_ID) return envKoppeling() ? indelingUit(envRij(getDb(), householdId)) : null
   const rij = rijVan(getDb(), householdId, id)
   return rij ? indelingUit(rij) : null
 }
@@ -302,12 +264,11 @@ export async function laadIndeling(householdId: number, id: KoppelingId): Promis
  * null als de koppeling niet bestaat.
  *
  * Lezen, samenvoegen en terugschrijven gebeuren in één schrijf(), zodat twee gelijktijdige wijzigingen elkaar
- * niet overschrijven. Boven het maximum gaat er niets de database in, ook geen nieuwe omgevingsrij.
+ * niet overschrijven. Boven het maximum gaat er niets de database in.
  */
 export async function bewaarIndeling(householdId: number, id: KoppelingId, wijziging: MbIndelingWijziging): Promise<MbIndeling | null> {
-  if (id === ENV_ID && !envKoppeling()) return null
   return schrijf((tx) => {
-    const rij = id === ENV_ID ? zorgEnvRijTx(tx, householdId) : rijVan(tx, householdId, id)
+    const rij = rijVan(tx, householdId, id)
     if (!rij) return null
     const indeling: MbIndeling = { ...indelingUit(rij) }
     for (const [k, v] of Object.entries(wijziging)) {
@@ -323,20 +284,9 @@ export async function bewaarIndeling(householdId: number, id: KoppelingId, wijzi
   })
 }
 
-/** Werkt laatst_gebruikt bij (en voor de omgevingskoppeling de naam van de administratie). */
-export async function raakAan(householdId: number, id: KoppelingId, administratieNaam?: string): Promise<void> {
+/** Werkt laatst_gebruikt bij. */
+export async function raakAan(householdId: number, id: KoppelingId): Promise<void> {
   const nu = new Date()
-  if (id === ENV_ID) {
-    if (!envKoppeling()) return
-    schrijf((tx) => {
-      const rij = zorgEnvRijTx(tx, householdId)
-      tx.update(koppelingen)
-        .set({ laatstGebruikt: nu, ...(administratieNaam ? { administratieNaam } : {}) })
-        .where(eq(koppelingen.id, rij.id))
-        .run()
-    })
-    return
-  }
   getDb()
     .update(koppelingen)
     .set({ laatstGebruikt: nu })
@@ -351,8 +301,9 @@ export async function raakAan(householdId: number, id: KoppelingId, administrati
 export function exporteerKoppelingen(householdId: number, db: Lezer = getDb()) {
   const rijen = db.select().from(koppelingen).where(eq(koppelingen.householdId, householdId)).orderBy(asc(koppelingen.id)).all()
   return rijen.map((r) => ({
-    id: r.soort === SOORT_ENV ? ENV_ID : String(r.id),
+    id: String(r.id),
     soort: r.soort,
+    persoon: r.persoon ?? null,
     label: r.label,
     administratieId: r.administratieId,
     administratieNaam: r.administratieNaam,

@@ -199,6 +199,7 @@ export function OndernemingSectie({ persoon, wijzigPersoon, jaar, resultaat, hui
               onderneming={o}
               jaar={jaar}
               koppelingen={koppelingen}
+              persoon={persoon.id === 'B' ? 'B' : 'A'}
               onOvernemen={(imp, opties) =>
                 pas((x) => {
                   const nieuw = neemOver(x, imp, opties, uitkomstOnderneming(x, index, resultaat, params, jaar, urenLoondienst))
