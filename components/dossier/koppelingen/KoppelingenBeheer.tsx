@@ -34,6 +34,10 @@ function persoonOpties(namen: PersoonNamen) {
 
 export function KoppelingenBeheer({ namen = { A: 'Persoon A', B: 'Persoon B' } }: { namen?: PersoonNamen }) {
   const { koppelingen, laden, fout: laadFout, vernieuw } = useKoppelingen()
+  const [toevoegen, setToevoegen] = useState(false)
+  const [melding, setMelding] = useState<string | null>(null)
+  /** Net toegevoegd met meer dan één administratie: de kaart van deze koppeling vraagt meteen om de keuze. */
+  const [nieuw, setNieuw] = useState<{ id: string; administraties: MbAdministratie[] } | null>(null)
 
   return (
     <div className="space-y-6">
@@ -70,38 +74,95 @@ export function KoppelingenBeheer({ namen = { A: 'Persoon A', B: 'Persoon B' } }
         </p>
       </Card>
 
-      <Section icon={<Link2 />} title="Je koppelingen" subtitle="Per koppeling één administratie, dus één onderneming.">
-        {laden && koppelingen.length === 0 ? (
-          <p className="text-sm text-gray-600" aria-live="polite">
-            Koppelingen laden
-          </p>
-        ) : laadFout ? (
-          <Alert variant="let-op" role="alert">
-            {laadFout}
-          </Alert>
-        ) : koppelingen.length === 0 ? (
-          <p className="text-sm text-gray-600">Nog geen koppeling. Voeg er hieronder een toe.</p>
-        ) : (
-          <ul className="space-y-4" aria-label="Moneybird-koppelingen">
-            {koppelingen.map((k) => (
-              <li key={k.id}>
-                <KoppelingKaart koppeling={k} namen={namen} onGewijzigd={vernieuw} />
-              </li>
-            ))}
-          </ul>
-        )}
-      </Section>
+      <Section icon={<Link2 />} title="Je koppelingen" subtitle="Per koppeling één administratie, dus één onderneming. Je partner kan hier een eigen koppeling toevoegen.">
+        <div className="space-y-4">
+          {laden && koppelingen.length === 0 ? (
+            <p className="text-sm text-gray-600" aria-live="polite">
+              Koppelingen laden
+            </p>
+          ) : laadFout ? (
+            <Alert variant="let-op" role="alert">
+              {laadFout}
+            </Alert>
+          ) : koppelingen.length === 0 ? (
+            <p className="text-sm text-gray-600">Nog geen koppeling.</p>
+          ) : (
+            <ul className="space-y-4" aria-label="Moneybird-koppelingen">
+              {koppelingen.map((k) => (
+                <li key={k.id}>
+                  <KoppelingKaart
+                    koppeling={k}
+                    namen={namen}
+                    onGewijzigd={vernieuw}
+                    kiesUit={nieuw?.id === k.id ? nieuw.administraties : undefined}
+                    onGekozen={() => setNieuw(null)}
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
 
-      <NieuweKoppeling namen={namen} onGewijzigd={vernieuw} />
+          {melding && (
+            <Alert variant="info" role="status">
+              {melding}
+            </Alert>
+          )}
+
+          {toevoegen || (!laden && !laadFout && koppelingen.length === 0) ? (
+            <NieuweKoppeling
+              namen={namen}
+              kanAnnuleren={koppelingen.length > 0}
+              onAnnuleer={() => setToevoegen(false)}
+              onToegevoegd={async (r) => {
+                setToevoegen(false)
+                await vernieuw()
+                if (r.koppeling.administratieId) {
+                  setNieuw(null)
+                  setMelding(`Koppeling ${r.koppeling.label} is klaar, met administratie ${r.koppeling.administratieNaam ?? r.koppeling.administratieId}. Open een jaar en haal bij de onderneming de cijfers op.`)
+                } else {
+                  setNieuw({ id: r.koppeling.id, administraties: r.administraties })
+                  setMelding(null)
+                }
+              }}
+            />
+          ) : (
+            <div className="border-t border-gray-100 pt-4">
+              <Button
+                variant="secundair"
+                onClick={() => {
+                  setToevoegen(true)
+                  setMelding(null)
+                }}
+              >
+                <Plus aria-hidden="true" className="h-4 w-4" />
+                Koppeling toevoegen
+              </Button>
+            </div>
+          )}
+        </div>
+      </Section>
     </div>
   )
 }
 
-function KoppelingKaart({ koppeling: k, namen, onGewijzigd }: { koppeling: MbKoppelingPubliek; namen: PersoonNamen; onGewijzigd: () => Promise<void> }) {
+function KoppelingKaart({
+  koppeling: k,
+  namen,
+  onGewijzigd,
+  kiesUit,
+  onGekozen,
+}: {
+  koppeling: MbKoppelingPubliek
+  namen: PersoonNamen
+  onGewijzigd: () => Promise<void>
+  /** Net toegevoegd: de administraties van het token, en de keuze staat meteen open. */
+  kiesUit?: MbAdministratie[]
+  onGekozen?: () => void
+}) {
   const basis = useId().replace(/:/g, '')
-  const [modus, setModus] = useState<'rust' | 'administratie' | 'verwijderen'>('rust')
-  const [administraties, setAdministraties] = useState<MbAdministratie[] | null>(null)
-  const [keuze, setKeuze] = useState('')
+  const [modus, setModus] = useState<'rust' | 'administratie' | 'verwijderen'>(kiesUit ? 'administratie' : 'rust')
+  const [administraties, setAdministraties] = useState<MbAdministratie[] | null>(kiesUit ?? null)
+  const [keuze, setKeuze] = useState(kiesUit?.[0]?.id ?? '')
   const [bezig, setBezig] = useState(false)
   const [fout, setFout] = useState<string | null>(null)
 
@@ -131,6 +192,7 @@ function KoppelingKaart({ koppeling: k, namen, onGewijzigd }: { koppeling: MbKop
     setBezig(false)
     if (!r.ok) return setFout(r.fout ?? 'Opslaan is niet gelukt.')
     setModus('rust')
+    onGekozen?.()
     await onGewijzigd()
   }
 
@@ -196,6 +258,7 @@ function KoppelingKaart({ koppeling: k, namen, onGewijzigd }: { koppeling: MbKop
 
           {modus === 'administratie' && (
             <div className="mt-4 space-y-3 border-t border-gray-100 pt-4">
+              {kiesUit && kiesUit.length > 0 && <p className="text-sm text-gray-700">Het token werkt en heeft toegang tot meer administraties. Kies welke bij deze koppeling hoort.</p>}
               {bezig && !administraties ? (
                 <p className="text-sm text-gray-600" aria-live="polite">
                   Administraties ophalen uit Moneybird
@@ -250,7 +313,18 @@ function KoppelingKaart({ koppeling: k, namen, onGewijzigd }: { koppeling: MbKop
   )
 }
 
-function NieuweKoppeling({ namen, onGewijzigd }: { namen: PersoonNamen; onGewijzigd: () => Promise<void> }) {
+/** Het formulier om een koppeling toe te voegen, binnen het blok Je koppelingen. De administratie kies je daarna in de kaart. */
+function NieuweKoppeling({
+  namen,
+  kanAnnuleren,
+  onAnnuleer,
+  onToegevoegd,
+}: {
+  namen: PersoonNamen
+  kanAnnuleren: boolean
+  onAnnuleer: () => void
+  onToegevoegd: (r: { koppeling: MbKoppelingPubliek; administraties: MbAdministratie[] }) => Promise<void>
+}) {
   const labelIds = veldIds('koppeling-label')
   const tokenIds = veldIds('koppeling-token')
   const [label, setLabel] = useState('Moneybird')
@@ -258,106 +332,68 @@ function NieuweKoppeling({ namen, onGewijzigd }: { namen: PersoonNamen; onGewijz
   const [persoon, setPersoon] = useState<Persoon>('A')
   const [bezig, setBezig] = useState(false)
   const [fout, setFout] = useState<string | null>(null)
-  const [melding, setMelding] = useState<string | null>(null)
-  const [nieuw, setNieuw] = useState<{ koppeling: MbKoppelingPubliek; administraties: MbAdministratie[] } | null>(null)
-  const [keuze, setKeuze] = useState('')
 
   async function voegToe(e: FormEvent) {
     e.preventDefault()
     if (!token.trim()) return setFout('Plak eerst het token uit Moneybird.')
     setBezig(true)
     setFout(null)
-    setMelding(null)
     const r = await koppelingenApi.voegToe(token.trim(), label.trim() || 'Moneybird', persoon)
     setBezig(false)
     if (!r.ok || !r.data) return setFout(r.fout ?? 'Toevoegen is niet gelukt.')
     setToken('')
-    setNieuw(r.data)
-    setKeuze(r.data.administraties[0]?.id ?? '')
-    await onGewijzigd()
-  }
-
-  async function koppel() {
-    if (!nieuw || !keuze) return
-    setBezig(true)
-    setFout(null)
-    const r = await koppelingenApi.kiesAdministratie(nieuw.koppeling.id, keuze)
-    setBezig(false)
-    if (!r.ok) return setFout(r.fout ?? 'Opslaan is niet gelukt.')
-    setNieuw(null)
-    setLabel('Moneybird')
-    setMelding('De koppeling is klaar. Open een jaar en kies bij je onderneming Importeer uit Moneybird.')
-    await onGewijzigd()
+    await onToegevoegd(r.data)
   }
 
   return (
-    <Section icon={<Plus />} title="Koppeling toevoegen" subtitle="Met een persoonlijk API-token uit Moneybird.">
-      <div className="space-y-4">
-        <div aria-live="polite" className="space-y-3">
-          {fout && (
-            <Alert variant="let-op" role="alert">
-              {fout}
-            </Alert>
-          )}
-          {melding && <Alert variant="info">{melding}</Alert>}
-        </div>
-
-        {nieuw ? (
-          <div className="space-y-4">
-            <p className="text-sm text-gray-700">
-              Het token werkt. Kies welke administratie bij koppeling {nieuw.koppeling.label} hoort.
-            </p>
-            {nieuw.administraties.length === 0 ? (
-              <p className="text-sm text-gray-600">Dit token heeft geen toegang tot een administratie. Controleer in Moneybird bij welke administratie je het token hebt gemaakt.</p>
-            ) : (
-              <Select label="Administratie" value={keuze} onChange={setKeuze} options={administratieOpties(nieuw.administraties)} />
-            )}
-            <div className="flex flex-wrap gap-2">
-              <Button onClick={koppel} disabled={bezig || !keuze}>
-                {bezig ? 'Bezig' : 'Administratie koppelen'}
-              </Button>
-              <Button variant="kaal" onClick={() => setNieuw(null)} disabled={bezig}>
-                Later kiezen
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <form onSubmit={voegToe} className="space-y-4" autoComplete="off">
-            <Field ids={labelIds} label="Naam van de koppeling" hint="Voor jezelf, bijvoorbeeld de naam van je bedrijf.">
-              <input
-                id={labelIds.invoer}
-                type="text"
-                value={label}
-                maxLength={80}
-                aria-describedby={labelIds.hint}
-                onChange={(e) => setLabel(e.target.value)}
-                className={cn(INVOER_KLASSE, 'border-gray-200 px-3.5 hover:border-gray-300')}
-              />
-            </Field>
-            <Select label="Van wie?" hint="De onderneming van deze persoon gebruikt deze koppeling." value={persoon} onChange={(v) => setPersoon(v === 'B' ? 'B' : 'A')} options={persoonOpties(namen)} />
-            <Field ids={tokenIds} label="Persoonlijk API-token" verplicht hint="Wordt versleuteld opgeslagen en daarna niet meer getoond.">
-              <input
-                id={tokenIds.invoer}
-                type="password"
-                value={token}
-                autoComplete="off"
-                autoCapitalize="off"
-                autoCorrect="off"
-                spellCheck={false}
-                maxLength={500}
-                aria-describedby={tokenIds.hint}
-                aria-required
-                onChange={(e) => setToken(e.target.value)}
-                className={cn(INVOER_KLASSE, 'border-gray-200 px-3.5 font-mono hover:border-gray-300')}
-              />
-            </Field>
-            <Button type="submit" disabled={bezig || !token.trim()}>
-              <KeyRound aria-hidden="true" className="h-4 w-4" />
-              {bezig ? 'Token controleren' : 'Token controleren en toevoegen'}
-            </Button>
-          </form>
+    <form onSubmit={voegToe} className="space-y-4 rounded-xl border border-gray-200 bg-gray-50/60 p-4" autoComplete="off" aria-label="Koppeling toevoegen">
+      <h3 className="text-base font-medium text-gray-900">Koppeling toevoegen</h3>
+      {fout && (
+        <Alert variant="let-op" role="alert">
+          {fout}
+        </Alert>
+      )}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field ids={labelIds} label="Naam van de koppeling" hint="Voor jezelf, bijvoorbeeld de naam van je bedrijf.">
+          <input
+            id={labelIds.invoer}
+            type="text"
+            value={label}
+            maxLength={80}
+            aria-describedby={labelIds.hint}
+            onChange={(e) => setLabel(e.target.value)}
+            className={cn(INVOER_KLASSE, 'border-gray-200 px-3.5 hover:border-gray-300')}
+          />
+        </Field>
+        <Select label="Van wie?" hint="De onderneming van deze persoon gebruikt deze koppeling." value={persoon} onChange={(v) => setPersoon(v === 'B' ? 'B' : 'A')} options={persoonOpties(namen)} />
+      </div>
+      <Field ids={tokenIds} label="Persoonlijk API-token" verplicht hint="Wordt versleuteld opgeslagen en daarna niet meer getoond. Heeft het token één administratie, dan is de koppeling meteen klaar.">
+        <input
+          id={tokenIds.invoer}
+          type="password"
+          value={token}
+          autoComplete="off"
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
+          maxLength={500}
+          aria-describedby={tokenIds.hint}
+          aria-required
+          onChange={(e) => setToken(e.target.value)}
+          className={cn(INVOER_KLASSE, 'border-gray-200 px-3.5 font-mono hover:border-gray-300')}
+        />
+      </Field>
+      <div className="flex flex-wrap gap-2">
+        <Button type="submit" disabled={bezig || !token.trim()}>
+          <KeyRound aria-hidden="true" className="h-4 w-4" />
+          {bezig ? 'Token controleren' : 'Token controleren en toevoegen'}
+        </Button>
+        {kanAnnuleren && (
+          <Button type="button" variant="kaal" onClick={onAnnuleer} disabled={bezig}>
+            Annuleren
+          </Button>
         )}
       </div>
-    </Section>
+    </form>
   )
 }

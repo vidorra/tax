@@ -11,7 +11,7 @@
 import { randomBytes } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { gebruikTijdelijkeDb } from '@/lib/db/testdb'
 import { voorbeeldInvoer } from '@/lib/voorbeeld'
 import type { HuishoudenInvoer } from '@/lib/tax/types'
@@ -184,6 +184,13 @@ describe('JSON-import op een echte database', () => {
   })
 
   it('(b) Ingediend uit het bestand blijft Ingediend, Gecontroleerd wordt Concept; (c) herstel zet alles terug', async () => {
+    // De import rekent met een vaste datum (herstelpunt tot 2026-11-04); herstellen leest de klok. Zet die vast, anders
+    // is het herstelpunt vanaf die datum verlopen en faalt de test op de kalender.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-05T10:05:00Z'))
+    onTestFinished(() => {
+      vi.useRealTimers()
+    })
     const opslag = await import('@/lib/dossier/opslag')
     const { laadAangifteStaat, vervangAangifteStaat } = await import('@/lib/dossier/aangiftestaat-opslag')
     const { controleerVerzoek, importeerJson, herstelVoorstel, herstelImport, telHerstelpunten } = await import('@/lib/dossier/import-opslag')
