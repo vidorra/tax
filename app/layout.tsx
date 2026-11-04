@@ -1,14 +1,17 @@
 import type { Metadata, Viewport } from 'next'
-import { Lexend_Deca } from 'next/font/google'
+import localFont from 'next/font/local'
 import type { ReactNode } from 'react'
 import Layout from '@/components/Layout'
 import UmamiScript from '@/components/UmamiScript'
 import { SITE, absoluteUrl } from '@/lib/site'
 import './globals.css'
 
-const lexendDeca = Lexend_Deca({
-  subsets: ['latin'],
-  weight: ['300', '400', '500', '600', '700'],
+// Lexend Deca staat in de repository (variabel, 300 tot 700, Latijn; OFL-licentie in app/fonts/OFL.txt). Zo hangt de
+// build niet af van Google Fonts: de loader van next/font/google faalde in GitHub Actions op een antwoord van Google.
+const lexendDeca = localFont({
+  src: './fonts/LexendDeca-latin.woff2',
+  weight: '300 700',
+  style: 'normal',
   display: 'swap',
   variable: '--font-lexend-deca',
 })
